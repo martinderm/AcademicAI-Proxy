@@ -33,6 +33,9 @@ def get_headers() -> dict:
 def get_base_url() -> str:
     """
     Gibt die AcademicAI Base-URL zurück.
+    Muss explizit über ACADEMICAI_BASE_URL gesetzt sein.
     """
-    url = os.environ.get("ACADEMICAI_BASE_URL", "https://boku.academic-ai.at/")
+    url = os.environ.get("ACADEMICAI_BASE_URL")
+    if not url:
+        raise ValueError("ACADEMICAI_BASE_URL muss gesetzt sein (via .env oder Umgebungsvariable).")
     return url.rstrip("/")
