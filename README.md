@@ -105,6 +105,15 @@ If you want proxy defaults to control style, do **not** hard-set these in OpenCl
    - normal assistant text
 5. Upstream orchestrator executes tool and sends `role=tool` follow-up
 
+### Post-tool guard (stability improvement)
+
+When tool mode is active and the latest message already has `role=tool`,
+the proxy injects a short guard instruction that prefers a final user-facing
+answer and discourages unnecessary additional tool calls.
+
+This reduces accidental re-tooling loops while still allowing another tool call
+if the latest tool result is clearly incomplete.
+
 ## Tests
 
 Run smoke + functional tests:
@@ -112,6 +121,7 @@ Run smoke + functional tests:
 ```powershell
 py -m pytest -q
 py test_tool_emulation.py
+py -m pytest -q test_post_tool_guard.py
 ```
 
 Optional:

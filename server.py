@@ -56,6 +56,31 @@ def _extract_text_content(msg_content) -> str:
     return ""
 
 
+def _apply_post_tool_guard(messages: list, has_tools: bool) -> list:
+    """
+    Stabilisiert den Follow-up-Schritt nach einem Tool-Result:
+    Wenn die letzte Message bereits role=tool ist, wird eine knappe
+    System-Instruktion vorangestellt, die eine finale Antwort bevorzugt
+    und unnötige weitere Tool-Calls verhindert.
+    """
+    if not has_tools or not messages:
+        return messages
+
+    last_role = (messages[-1] or {}).get("role")
+    if last_role != "tool":
+        return messages
+
+    guard = {
+        "role": "system",
+        "content": (
+            "NO_FURTHER_TOOL_CALLS: You already received tool results. "
+            "Now produce the final user-facing answer. "
+            "Call another tool only if the latest tool result is clearly missing required data."
+        ),
+    }
+    return [guard] + messages
+
+
 def _is_human_readable_target(messages: list) -> bool:
     """
     Heuristik: Nur bei menschlichen Zielkanälen JSON->Human-Text-Fallback aktivieren.
@@ -191,6 +216,9 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     if ("tool_choice" in body) and not has_tools:
         log.warning("tool_choice provided without tools; ignoring tool emulation for this request")
     log.info(f"incoming: model={model} stream={body.get('stream')} roles={[m.get('role') for m in messages]} tools={len(tools)} has_tools={has_tools}")
+
+    # Bei Follow-up nach Tool-Result finale Antwort stärker priorisieren
+    messages = _apply_post_tool_guard(messages, has_tools=has_tools)
 
     # Tool-Definitionen in System-Prompt injizieren
     if tools:
