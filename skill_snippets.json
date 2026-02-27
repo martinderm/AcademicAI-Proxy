@@ -1,0 +1,7 @@
+[
+  {
+    "id": "himalaya-mailbox-boku-lll",
+    "topics": ["mail", "mailbox", "inbox", "email", "e-mail", "wordpress", "himalaya", "boku-lll"],
+    "snippet": "For mailbox status/questions in BOKU context, use exec with Himalaya wrapper first instead of assumptions. Wrapper path: skills/himalaya-boku-lll/scripts/himalaya-boku-lll-wrapper.ps1. IMPORTANT syntax: put options BEFORE search query. Correct: '& $wrapper envelope list -s 50 \"from wordpress@usage-ng.boku.ac.at\"'. Also valid: '& $wrapper envelope list -s 20'. Do not use query before '-s'. If tool output contains 'Error:' or 'cannot parse', do not claim success: correct the command and retry once."
+  }
+]

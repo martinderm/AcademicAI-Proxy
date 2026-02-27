@@ -72,23 +72,7 @@ def _normalize_messages(messages: list) -> list:
         else:
             normalized.append({"role": role, "content": content})
 
-    # 3. System-Text in erste user-Message einbauen
-    if system_parts:
-        system_text = "\n\n".join(system_parts)
-        injected = False
-        result = []
-        for m in normalized:
-            if not injected and m.get("role") == "user":
-                merged = f"[System context]\n{system_text}\n\n[User message]\n{m['content']}"
-                result.append({"role": "user", "content": merged})
-                injected = True
-            else:
-                result.append(m)
-        if not injected:
-            result.insert(0, {"role": "user", "content": system_text})
-        normalized = result
-
-    # 4. Aufeinanderfolgende gleiche Rollen zusammenführen
+    # 3. Aufeinanderfolgende gleiche Rollen zusammenführen
     merged = []
     for m in normalized:
         if merged and merged[-1]["role"] == m["role"]:
@@ -96,16 +80,32 @@ def _normalize_messages(messages: list) -> list:
         else:
             merged.append({"role": m["role"], "content": m["content"]})
 
-    # 5. Muss mit user beginnen
+    # 4. Muss mit user beginnen
     while merged and merged[0]["role"] != "user":
         merged.pop(0)
 
-    # 6. Auf letzte 20 Turns kürzen (Kontextfenster schonen)
+    # 5. Auf letzte 20 Turns kürzen (Kontextfenster schonen)
     if len(merged) > 20:
         merged = merged[-20:]
         # Wieder mit user beginnen
         while merged and merged[0]["role"] != "user":
             merged.pop(0)
+
+    # 6. System-Text zuletzt injizieren (sticky), damit er nicht durchs Trimming verloren geht
+    if system_parts:
+        system_text = "\n\n".join(system_parts)
+        injected = False
+        result = []
+        for m in merged:
+            if not injected and m.get("role") == "user":
+                merged_content = f"[System context]\n{system_text}\n\n[User message]\n{m['content']}"
+                result.append({"role": "user", "content": merged_content})
+                injected = True
+            else:
+                result.append(m)
+        if not injected:
+            result.insert(0, {"role": "user", "content": system_text})
+        merged = result
 
     return merged
 

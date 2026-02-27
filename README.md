@@ -100,6 +100,35 @@ Rule:
 - Tool mode (`tools`/`functions` present) -> tool defaults
 - Explicit client fields always win
 
+### Optional humanization pass (recommended for chat UX)
+
+You can enable a second LLM pass that rewrites structured/tool-derived output
+into natural human text.
+
+- Active only for human channels
+- Active only in tool mode
+- Skipped when the model emits an actual tool call (`finish_reason: tool_calls`)
+
+Env flags:
+- `ACADEMICAI_ENABLE_HUMANIZATION_PASS=true|false`
+- `ACADEMICAI_HUMANIZATION_MODEL=<optional override>` (default: same model)
+- `ACADEMICAI_HUMANIZATION_TEMPERATURE=0.2`
+
+### Optional skill snippet injection (tool-call reliability)
+
+You can enable retrieval-based skill snippets that are injected as short system context
+before tool-emulation. This increases the chance of correct tool use for domain intents
+(e.g. mailbox/email -> Himalaya wrapper commands).
+
+Env flags:
+- `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false`
+- `ACADEMICAI_SKILL_SNIPPETS_FILE=./skill_snippets.json`
+- `ACADEMICAI_SKILL_SNIPPETS_MAX=1`
+
+Notes:
+- Injection runs only in tool mode (`tools`/`functions` present).
+- Snippets are selected by topic match against the latest user message.
+
 ## Notes for OpenClaw users
 
 If you want proxy defaults to control style, do **not** hard-set these in OpenClaw for this provider:

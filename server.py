@@ -19,6 +19,8 @@ import time
 import uuid
 import json
 import logging
+from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -56,29 +58,101 @@ def _extract_text_content(msg_content) -> str:
     return ""
 
 
+def _last_user_text(messages: list) -> str:
+    """Liefert den letzten User-Text aus den Original-Messages."""
+    for m in reversed(messages or []):
+        if m.get("role") == "user":
+            return _extract_text_content(m.get("content"))
+    return ""
+
+
 def _apply_post_tool_guard(messages: list, has_tools: bool) -> list:
     """
-    Stabilisiert den Follow-up-Schritt nach einem Tool-Result:
-    Wenn die letzte Message bereits role=tool ist, wird eine knappe
-    System-Instruktion vorangestellt, die eine finale Antwort bevorzugt
-    und unnötige weitere Tool-Calls verhindert.
+    Stabilisiert den Follow-up-Schritt nach einem Tool-Result.
+    - Erfolgreiches Tool-Result: finale Antwort bevorzugen.
+    - Fehlerhaftes Tool-Result: Erfolg NICHT behaupten, sondern korrigierten
+      Tool-Call auslösen oder Fehler transparent melden.
     """
     if not has_tools or not messages:
         return messages
 
-    last_role = (messages[-1] or {}).get("role")
-    if last_role != "tool":
+    last = messages[-1] or {}
+    if last.get("role") != "tool":
         return messages
 
-    guard = {
-        "role": "system",
-        "content": (
+    tool_text = _extract_text_content(last.get("content")).lower()
+    has_error = any(tok in tool_text for tok in ["error:", "cannot parse", "failed", "not found", "exception"])
+
+    if has_error:
+        guard_text = (
+            "TOOL_RESULT_ERROR: The latest tool result contains an error. "
+            "Do NOT claim success. Either issue a corrected tool_call, or explain the failure clearly. "
+            "For Himalaya envelope search, keep options before query, e.g. envelope list -s 50 \"from wordpress@usage-ng.boku.ac.at\"."
+        )
+    else:
+        guard_text = (
             "NO_FURTHER_TOOL_CALLS: You already received tool results. "
             "Now produce the final user-facing answer. "
             "Call another tool only if the latest tool result is clearly missing required data."
-        ),
-    }
-    return [guard] + messages
+        )
+
+    return [{"role": "system", "content": guard_text}] + messages
+
+
+def _score_topic_match(user_text: str, topics: list) -> int:
+    txt = (user_text or "").lower()
+    score = 0
+    for t in (topics or []):
+        tok = str(t).strip().lower()
+        if tok and tok in txt:
+            score += 1
+    return score
+
+
+def _load_skill_snippets() -> list:
+    try:
+        p = Path(SKILL_SNIPPETS_FILE)
+        if not p.exists():
+            return []
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        log.warning(f"skill snippets load failed: {e}")
+        return []
+
+
+def _inject_skill_snippet_context(messages: list, user_text: str) -> list:
+    """Injiziert passende Skill-Snippets als kurze System-Message."""
+    if not ENABLE_SKILL_SNIPPETS:
+        return messages
+
+    snippets = _load_skill_snippets()
+    if not snippets:
+        return messages
+
+    scored = []
+    for s in snippets:
+        score = _score_topic_match(user_text, s.get("topics", []))
+        if score > 0 and s.get("snippet"):
+            scored.append((score, s))
+
+    if not scored:
+        return messages
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    selected = [s for _, s in scored[: max(1, SKILL_SNIPPETS_MAX)]]
+    selected_ids = [str(s.get("id", "snippet")) for s in selected]
+    log.info(f"skill snippet injection: selected_ids={selected_ids}")
+
+    parts = [
+        "SKILL CONTEXT (retrieved): Use this operational guidance when deciding tool calls."
+    ]
+    for s in selected:
+        sid = s.get("id", "snippet")
+        parts.append(f"[{sid}] {s.get('snippet', '').strip()}")
+
+    msg = {"role": "system", "content": "\n\n".join(parts)}
+    return [msg] + messages
 
 
 def _is_human_readable_target(messages: list) -> bool:
@@ -149,6 +223,54 @@ DEFAULT_CHAT_VERBOSITY = os.environ.get("ACADEMICAI_DEFAULT_CHAT_VERBOSITY", "me
 DEFAULT_TOOL_VERBOSITY = os.environ.get("ACADEMICAI_DEFAULT_TOOL_VERBOSITY", "low")
 DEFAULT_TOOL_REASONING_EFFORT = os.environ.get("ACADEMICAI_DEFAULT_TOOL_REASONING_EFFORT", "low")
 
+# Optionaler zweiter Pass: strukturiertes Ergebnis -> natürlichsprachliche Endantwort
+ENABLE_HUMANIZATION_PASS = os.environ.get("ACADEMICAI_ENABLE_HUMANIZATION_PASS", "false").lower() in ("1", "true", "yes", "on")
+HUMANIZATION_MODEL = os.environ.get("ACADEMICAI_HUMANIZATION_MODEL", "").strip()
+HUMANIZATION_TEMPERATURE = float(os.environ.get("ACADEMICAI_HUMANIZATION_TEMPERATURE", "0.2"))
+
+# Optional: skill snippet retrieval/injection to improve tool-call reliability
+ENABLE_SKILL_SNIPPETS = os.environ.get("ACADEMICAI_ENABLE_SKILL_SNIPPETS", "false").lower() in ("1", "true", "yes", "on")
+SKILL_SNIPPETS_FILE = os.environ.get("ACADEMICAI_SKILL_SNIPPETS_FILE", str(Path(__file__).with_name("skill_snippets.json")))
+SKILL_SNIPPETS_MAX = int(os.environ.get("ACADEMICAI_SKILL_SNIPPETS_MAX", "1"))
+
+
+def _build_humanization_messages(original_user_query: str, structured_content: str) -> list:
+    """Prompt für den optionalen zweiten LLM-Pass (Humanisierung)."""
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You rewrite structured tool output into a natural final answer for a human chat. "
+            "Return only the final answer text for the user. "
+            "Do NOT include JSON, code blocks, field names, metadata, or debug info."
+        ),
+    }
+    user_msg = {
+        "role": "user",
+        "content": (
+            f"Original user question:\n{original_user_query.strip() or '-'}\n\n"
+            f"Structured/tool-derived result:\n{structured_content.strip()}\n\n"
+            "Task: Write a concise, natural-language final reply for the user."
+        ),
+    }
+    return [system_msg, user_msg]
+
+
+async def _run_humanization_pass(model: str, original_user_query: str, structured_content: str) -> Optional[str]:
+    """Führt optionalen zweiten LLM-Pass aus und liefert finalen Text zurück."""
+    try:
+        human_model = HUMANIZATION_MODEL or model
+        resp = await run_in_threadpool(
+            academicai.completion,
+            model=human_model,
+            messages=_build_humanization_messages(original_user_query, structured_content),
+            temperature=HUMANIZATION_TEMPERATURE,
+        )
+        text = (resp.choices[0].message.content or "").strip()
+        return text or None
+    except Exception as e:
+        log.warning(f"humanization pass failed, fallback to first-pass content: {e}")
+        return None
+
 # --- Setup ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("academicai-proxy")
@@ -210,12 +332,18 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     if top_level_system and not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": top_level_system})
 
+    original_user_query = _last_user_text(messages)
+
     # Tools extrahieren — werden via Prompt-Injection emuliert
     tools = body.get("tools") or body.get("functions") or []
     has_tools = bool(tools)
     if ("tool_choice" in body) and not has_tools:
         log.warning("tool_choice provided without tools; ignoring tool emulation for this request")
     log.info(f"incoming: model={model} stream={body.get('stream')} roles={[m.get('role') for m in messages]} tools={len(tools)} has_tools={has_tools}")
+
+    # Optional: passende Skill-Snippets injizieren (z.B. mailbox/email -> Himalaya wrapper)
+    if has_tools:
+        messages = _inject_skill_snippet_context(messages, user_text=original_user_query)
 
     # Bei Follow-up nach Tool-Result finale Antwort stärker priorisieren
     messages = _apply_post_tool_guard(messages, has_tools=has_tools)
@@ -326,6 +454,19 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
                             log.warning(f"json_mode parse failed, using raw content: {content[:120]}")
                 else:
                     log.warning("json_mode: arbitrary JSON on non-human target, keeping raw content")
+
+    # Optionaler zweiter Pass: natürliche Endantwort für Human-Channels
+    if (
+        ENABLE_HUMANIZATION_PASS
+        and human_target
+        and has_tools
+        and not tool_call_data
+        and (content or "").strip()
+    ):
+        humanized = await _run_humanization_pass(model=resp_model, original_user_query=original_user_query, structured_content=content)
+        if humanized:
+            log.info(f"humanization pass applied: len_before={len(content)} len_after={len(humanized)}")
+            content = humanized
 
     # Wenn Streaming gewünscht: Antwort als SSE emulieren
     if want_stream:

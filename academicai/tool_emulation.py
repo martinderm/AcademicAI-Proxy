@@ -298,6 +298,9 @@ def format_arbitrary_json_for_humans(content: str) -> Optional[str]:
     """
     Formatiert beliebiges JSON in menschenlesbaren Text (ohne JSON-Codeblock).
     Nur fuer Human-Channels gedacht.
+
+    Ziel: Keine technischen Meta-Felder (status/source/timestamp/...) in der
+    sichtbaren Antwort, sondern vorrangig das inhaltliche Ergebnis.
     """
     if not content:
         return None
@@ -307,6 +310,11 @@ def format_arbitrary_json_for_humans(content: str) -> Optional[str]:
 
     if isinstance(parsed, dict) and parsed.get("action") in ("tool_call", "respond"):
         return None
+
+    META_KEYS = {
+        "status", "source", "timestamp", "stored_in", "requested_room",
+        "note", "path", "id", "ids", "debug", "meta", "metadata",
+    }
 
     def _is_scalar(v):
         return isinstance(v, (str, int, float, bool)) or v is None
@@ -318,6 +326,37 @@ def format_arbitrary_json_for_humans(content: str) -> Optional[str]:
             return "ja" if v else "nein"
         return str(v)
 
+    def _filter_obj(obj):
+        if isinstance(obj, dict):
+            filtered = {k: _filter_obj(v) for k, v in obj.items() if k not in META_KEYS}
+            # Falls alles rausgefiltert wurde: Original behalten (sonst leere Antwort)
+            return filtered if filtered else obj
+        if isinstance(obj, list):
+            return [_filter_obj(x) for x in obj]
+        return obj
+
+    parsed = _filter_obj(parsed)
+
+    # Spezialfall: typisches rooms/zoom_rooms-Objekt -> direkte menschenlesbare Liste
+    if isinstance(parsed, dict):
+        room_list = None
+        for key in ("zoom_rooms", "rooms"):
+            if isinstance(parsed.get(key), list):
+                room_list = parsed[key]
+                break
+        if room_list is not None:
+            lines = ["Hier die bekannten Räume:"]
+            for r in room_list:
+                if isinstance(r, dict):
+                    name = r.get("name")
+                    url = r.get("url")
+                    if name and url:
+                        lines.append(f"- {name}: {url}")
+                    elif name:
+                        lines.append(f"- {name}")
+            if len(lines) > 1:
+                return "\n".join(lines)
+
     def _render(obj, indent=0):
         pad = "  " * indent
         lines = []
@@ -326,10 +365,10 @@ def format_arbitrary_json_for_humans(content: str) -> Optional[str]:
                 if _is_scalar(v):
                     lines.append(f"{pad}- {k}: {_fmt_scalar(v)}")
                 elif isinstance(v, list):
-                    lines.append(f"{pad}- {k}:")
                     if not v:
-                        lines.append(f"{pad}  - (leer)")
-                    elif all(_is_scalar(x) for x in v):
+                        continue
+                    lines.append(f"{pad}- {k}:")
+                    if all(_is_scalar(x) for x in v):
                         for x in v:
                             lines.append(f"{pad}  - {_fmt_scalar(x)}")
                     else:
@@ -341,8 +380,8 @@ def format_arbitrary_json_for_humans(content: str) -> Optional[str]:
                     lines.extend(_render(v, indent + 1))
         elif isinstance(obj, list):
             if not obj:
-                lines.append(f"{pad}- (leer)")
-            elif all(_is_scalar(x) for x in obj):
+                return lines
+            if all(_is_scalar(x) for x in obj):
                 for x in obj:
                     lines.append(f"{pad}- {_fmt_scalar(x)}")
             else:
@@ -356,7 +395,7 @@ def format_arbitrary_json_for_humans(content: str) -> Optional[str]:
     rendered = _render(parsed)
     if not rendered:
         return None
-    return "Hier die Infos kompakt:\n" + "\n".join(rendered)
+    return "Hier die Infos:\n" + "\n".join(rendered)
 
 
 def strip_tool_call_tag(content: str) -> str:

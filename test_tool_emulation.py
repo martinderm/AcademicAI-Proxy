@@ -376,7 +376,7 @@ fenced_json = """```json
 
 human_text = format_arbitrary_json_for_humans(fenced_json)
 
-ok_humanizer = isinstance(human_text, str) and human_text.startswith("Hier die Infos kompakt:") and "- status: ok" in human_text
+ok_humanizer = isinstance(human_text, str) and human_text.startswith("Hier die Infos:") and "capabilities" in human_text
 print_result("Fenced JSON -> menschenlesbarer Text", ok_humanizer, f"got: {repr(human_text)[:160]}")
 
 # ── Test 6b: Arbitrary-JSON-Fallback (Integration, live Proxy) ───────────────
