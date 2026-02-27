@@ -16,6 +16,18 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 AcademicAI does not provide native OpenAI function-calling/tool-calling in the same way OpenAI-compatible clients expect.
 This proxy emulates the tool flow so orchestrators (e.g. OpenClaw) can still run tools reliably.
 
+### Important: limits of tool-call emulation (plain language)
+
+Tool-calling is **simulated**, not native. That means the model is guided via prompt + JSON parsing,
+not by a backend-level function-calling engine.
+
+In practice this works well, but there are limits:
+- behavior is probabilistic (occasionally the model may answer in JSON style instead of ideal natural text)
+- extra guardrails are needed to avoid unnecessary repeated tool calls
+- reliability is generally lower than true native tool-calling APIs
+
+So: good for practical use, but not mathematically deterministic.
+
 ## Endpoints
 
 - `GET /health`
