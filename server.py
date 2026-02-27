@@ -36,7 +36,7 @@ import uvicorn
 import academicai
 from academicai.tool_emulation import (
     inject_tools_into_messages,
-    parse_tool_call,
+    parse_tool_calls,
     extract_respond_content,
     format_arbitrary_json_as_codeblock,
     format_arbitrary_json_for_humans,
@@ -153,6 +153,45 @@ def _inject_skill_snippet_context(messages: list, user_text: str) -> list:
 
     msg = {"role": "system", "content": "\n\n".join(parts)}
     return [msg] + messages
+
+
+def _is_mail_delete_exec_call(call: dict) -> bool:
+    """Erkennt exec-Calls, die Himalaya-Mails löschen/verschieben."""
+    if not isinstance(call, dict) or call.get("name") != "exec":
+        return False
+    args = call.get("arguments") or {}
+    cmd = str(args.get("command", "")).lower()
+    return ("message delete" in cmd) or ("message move" in cmd and "cabinet" in cmd)
+
+
+def _enforce_write_before_mail_delete(tool_calls: list[dict]) -> tuple[list[dict], bool]:
+    """
+    Safety-Guard für Batch-Tool-Calls:
+    Mail-Delete/Move darf in derselben Batch nur passieren, wenn vorher ein write/edit Call enthalten ist.
+
+    Returns: (filtered_calls, blocked_any)
+    """
+    if not tool_calls:
+        return [], False
+
+    out = []
+    blocked_any = False
+    has_write_before = False
+    for c in tool_calls:
+        name = (c or {}).get("name")
+        if name in ("write", "edit"):
+            has_write_before = True
+            out.append(c)
+            continue
+
+        if _is_mail_delete_exec_call(c) and not has_write_before:
+            blocked_any = True
+            log.warning("blocked unsafe mail delete/move call without prior write/edit in same batch")
+            continue
+
+        out.append(c)
+
+    return out, blocked_any
 
 
 def _is_human_readable_target(messages: list) -> bool:
@@ -416,12 +455,15 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     }
 
     # JSON-Mode Response verarbeiten (nur wenn Tools im Request waren)
-    tool_call_data = None
+    tool_calls_data = []
+    blocked_unsafe_delete = False
     human_target = human_target_hint
     if has_tools:
-        tool_call_data = parse_tool_call(content)
-        if tool_call_data:
-            log.info(f"tool_call detected: {tool_call_data['name']}({list(tool_call_data.get('arguments', {}).keys())})")
+        tool_calls_data = parse_tool_calls(content)
+        if tool_calls_data:
+            tool_calls_data, blocked_unsafe_delete = _enforce_write_before_mail_delete(tool_calls_data)
+            names = [c.get("name", "?") for c in tool_calls_data]
+            log.info(f"tool_call(s) detected: count={len(tool_calls_data)} names={names}")
         else:
             # Kein Tool-Call — entweder {"action":"respond",...} oder Fallback
             extracted = extract_respond_content(content)
@@ -455,12 +497,20 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
                 else:
                     log.warning("json_mode: arbitrary JSON on non-human target, keeping raw content")
 
+    # Klarer User-Text wenn ein unsicherer Delete-Call geblockt wurde
+    if has_tools and blocked_unsafe_delete and not tool_calls_data:
+        content = (
+            "Blocked unsafe mail action: message delete/move requires a prior write/edit "
+            "in the same tool-call batch."
+        )
+        finish_reason = "stop"
+
     # Optionaler zweiter Pass: natürliche Endantwort für Human-Channels
     if (
         ENABLE_HUMANIZATION_PASS
         and human_target
         and has_tools
-        and not tool_call_data
+        and not tool_calls_data
         and (content or "").strip()
     ):
         humanized = await _run_humanization_pass(model=resp_model, original_user_query=original_user_query, structured_content=content)
@@ -471,9 +521,9 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     # Wenn Streaming gewünscht: Antwort als SSE emulieren
     if want_stream:
         def sse_generator():
-            if tool_call_data:
+            if tool_calls_data:
                 # Tool-Call-Chunks im OpenAI-Streaming-Format
-                for chunk in build_tool_calls_sse_chunks(completion_id, created_ts, resp_model, tool_call_data):
+                for chunk in build_tool_calls_sse_chunks(completion_id, created_ts, resp_model, tool_calls_data):
                     yield f"data: {json.dumps(chunk)}\n\n"
             else:
                 # Normaler Text-Response als SSE
@@ -488,8 +538,8 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
         return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
     # Kein Streaming: normaler JSON-Response
-    if tool_call_data:
-        return build_tool_calls_response(completion_id, created_ts, resp_model, tool_call_data, usage)
+    if tool_calls_data:
+        return build_tool_calls_response(completion_id, created_ts, resp_model, tool_calls_data, usage)
 
     return {
         "id": completion_id,

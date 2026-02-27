@@ -142,9 +142,11 @@ If you want proxy defaults to control style, do **not** hard-set these in OpenCl
 2. Injects tool schema/instructions into prompt
 3. Forces JSON response mode
 4. Parses model JSON into either:
-   - tool call response (`finish_reason: tool_calls`)
-   - normal assistant text
-5. Upstream orchestrator executes tool and sends `role=tool` follow-up
+   - single tool call: `{"action":"tool_call",...}`
+   - multi-step tool calls: `{"action":"tool_calls","calls":[...]}`
+   - normal assistant text (`{"action":"respond",...}`)
+5. Converts tool call(s) into OpenAI `tool_calls` response (`finish_reason: tool_calls`)
+6. Upstream orchestrator executes tool and sends `role=tool` follow-up
 
 ### Post-tool guard (stability improvement)
 
@@ -154,6 +156,17 @@ answer and discourages unnecessary additional tool calls.
 
 This reduces accidental re-tooling loops while still allowing another tool call
 if the latest tool result is clearly incomplete.
+
+### Mail-delete safety guard (write-before-delete)
+
+For mailbox workflows, the proxy enforces this batch rule:
+- `exec` calls containing `message delete` or `message move ... Cabinet`
+  are allowed only if a prior `write` or `edit` call exists in the same
+  tool-call batch.
+
+If such a delete/move is blocked and no safe tool call remains, the proxy returns
+plain text:
+- `Blocked unsafe mail action: message delete/move requires a prior write/edit in the same tool-call batch.`
 
 ## Tests
 

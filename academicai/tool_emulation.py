@@ -58,10 +58,16 @@ Available tools:
 {tool_list}
 
 You MUST respond with a valid JSON object. No explanation, no markdown, \
-no extra text outside the JSON. Choose exactly one of these formats:
+no extra text outside the JSON. Choose one of these formats:
 
-If a tool is needed:
+If one tool is needed:
 {{"action": "tool_call", "name": "<tool_name>", "arguments": {{<params>}}}}
+
+If multiple tool calls are needed in one turn:
+{{"action": "tool_calls", "calls": [
+  {{"name": "<tool_name>", "arguments": {{<params>}}}},
+  {{"name": "<tool_name>", "arguments": {{<params>}}}}
+]}}
 
 If you can answer directly from your knowledge:
 {{"action": "respond", "content": "<your answer>"}}
@@ -187,12 +193,31 @@ def _extract_json_object(text: str) -> Optional[dict]:
     return None
 
 
+def _normalize_tool_call_entry(entry: dict) -> Optional[dict]:
+    """Normalisiert einen einzelnen Tool-Call-Eintrag auf {name, arguments}."""
+    if not isinstance(entry, dict):
+        return None
+    name = entry.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    arguments = entry.get("arguments", {})
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except (json.JSONDecodeError, ValueError):
+            arguments = {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    return {"name": name, "arguments": arguments}
+
+
 def parse_json_mode_response(content: str) -> Optional[dict]:
     """
     Parst die JSON-Mode-Antwort des Modells.
 
     Returns eines von:
       {"action": "tool_call", "name": str, "arguments": dict}
+      {"action": "tool_calls", "calls": list[dict{name,arguments}]}
       {"action": "respond",   "content": str}
       None  -- Parsing fehlgeschlagen (Fallback: Content als Text behandeln)
     """
@@ -205,18 +230,23 @@ def parse_json_mode_response(content: str) -> Optional[dict]:
     action = data.get("action")
 
     if action == "tool_call":
-        name = data.get("name")
-        if not name or not isinstance(name, str):
+        normalized = _normalize_tool_call_entry(data)
+        if normalized is None:
             return None
-        arguments = data.get("arguments", {})
-        if not isinstance(arguments, dict):
-            # Manchmal liefert das Modell arguments als JSON-String
-            if isinstance(arguments, str):
-                try:
-                    arguments = json.loads(arguments)
-                except (json.JSONDecodeError, ValueError):
-                    arguments = {}
-        return {"action": "tool_call", "name": name, "arguments": arguments}
+        return {"action": "tool_call", "name": normalized["name"], "arguments": normalized["arguments"]}
+
+    if action == "tool_calls":
+        raw_calls = data.get("calls", [])
+        if not isinstance(raw_calls, list):
+            return None
+        calls = []
+        for c in raw_calls:
+            normalized = _normalize_tool_call_entry(c)
+            if normalized is not None:
+                calls.append(normalized)
+        if not calls:
+            return None
+        return {"action": "tool_calls", "calls": calls}
 
     if action == "respond":
         content_val = data.get("content", "")
@@ -225,16 +255,28 @@ def parse_json_mode_response(content: str) -> Optional[dict]:
     return None
 
 
-def parse_tool_call(content: str) -> Optional[dict]:
+def parse_tool_calls(content: str) -> list[dict]:
     """
-    Kompatibilitaets-Wrapper fuer server.py.
-    Gibt {"name": str, "arguments": dict} zurueck wenn tool_call,
-    sonst None.
+    Liefert eine Liste normalisierter Tool-Calls.
+
+    Unterstützt beide JSON-Mode-Formate:
+    - action=tool_call (single)
+    - action=tool_calls (multi)
     """
     result = parse_json_mode_response(content)
-    if result and result.get("action") == "tool_call":
-        return {"name": result["name"], "arguments": result.get("arguments", {})}
-    return None
+    if not result:
+        return []
+    if result.get("action") == "tool_call":
+        return [{"name": result["name"], "arguments": result.get("arguments", {})}]
+    if result.get("action") == "tool_calls":
+        return list(result.get("calls") or [])
+    return []
+
+
+def parse_tool_call(content: str) -> Optional[dict]:
+    """Legacy-Helper: gibt den ersten Tool-Call zurück (falls vorhanden)."""
+    calls = parse_tool_calls(content)
+    return calls[0] if calls else None
 
 
 def extract_respond_content(content: str) -> Optional[str]:
@@ -411,20 +453,35 @@ def build_tool_calls_response(
     completion_id: str,
     created_ts: int,
     model: str,
-    tool_call_data: dict,
+    tool_call_data,
     usage: dict,
 ) -> dict:
     """
     Baut eine vollstaendige OpenAI chat.completion Response mit tool_calls.
+    Unterstützt einen einzelnen Dict-Call oder eine Liste von Calls.
     finish_reason = "tool_calls"
     """
-    call_id = f"call_{uuid.uuid4().hex[:24]}"
-    arguments = tool_call_data.get("arguments", {})
-    arguments_str = (
-        json.dumps(arguments, ensure_ascii=False)
-        if isinstance(arguments, dict)
-        else str(arguments)
-    )
+    calls_in = tool_call_data if isinstance(tool_call_data, list) else [tool_call_data]
+    tool_calls = []
+    for c in calls_in:
+        call_id = f"call_{uuid.uuid4().hex[:24]}"
+        arguments = (c or {}).get("arguments", {})
+        arguments_str = (
+            json.dumps(arguments, ensure_ascii=False)
+            if isinstance(arguments, dict)
+            else str(arguments)
+        )
+        tool_calls.append(
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": c["name"],
+                    "arguments": arguments_str,
+                },
+            }
+        )
+
     return {
         "id": completion_id,
         "object": "chat.completion",
@@ -436,16 +493,7 @@ def build_tool_calls_response(
                 "message": {
                     "role": "assistant",
                     "content": None,
-                    "tool_calls": [
-                        {
-                            "id": call_id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_call_data["name"],
-                                "arguments": arguments_str,
-                            },
-                        }
-                    ],
+                    "tool_calls": tool_calls,
                 },
                 "finish_reason": "tool_calls",
             }
@@ -462,18 +510,34 @@ def build_tool_calls_sse_chunks(
     completion_id: str,
     created_ts: int,
     model: str,
-    tool_call_data: dict,
+    tool_call_data,
 ) -> list:
     """
-    Baut die SSE-Chunk-Sequenz fuer einen Tool-Call im OpenAI-Streaming-Format.
+    Baut die SSE-Chunk-Sequenz fuer Tool-Calls im OpenAI-Streaming-Format.
+    Unterstützt einen einzelnen Dict-Call oder eine Liste von Calls.
     """
-    call_id = f"call_{uuid.uuid4().hex[:24]}"
-    arguments = tool_call_data.get("arguments", {})
-    arguments_str = (
-        json.dumps(arguments, ensure_ascii=False)
-        if isinstance(arguments, dict)
-        else str(arguments)
-    )
+    calls_in = tool_call_data if isinstance(tool_call_data, list) else [tool_call_data]
+    tool_calls_delta = []
+    for idx, c in enumerate(calls_in):
+        call_id = f"call_{uuid.uuid4().hex[:24]}"
+        arguments = (c or {}).get("arguments", {})
+        arguments_str = (
+            json.dumps(arguments, ensure_ascii=False)
+            if isinstance(arguments, dict)
+            else str(arguments)
+        )
+        tool_calls_delta.append(
+            {
+                "index": idx,
+                "id": call_id,
+                "type": "function",
+                "function": {
+                    "name": c["name"],
+                    "arguments": arguments_str,
+                },
+            }
+        )
+
     return [
         # Chunk 1: role
         {
@@ -481,26 +545,14 @@ def build_tool_calls_sse_chunks(
             "created": created_ts, "model": model,
             "choices": [{"index": 0, "delta": {"role": "assistant", "content": None}, "finish_reason": None}],
         },
-        # Chunk 2: tool_call delta
+        # Chunk 2: tool_call delta(s)
         {
             "id": completion_id, "object": "chat.completion.chunk",
             "created": created_ts, "model": model,
             "choices": [
                 {
                     "index": 0,
-                    "delta": {
-                        "tool_calls": [
-                            {
-                                "index": 0,
-                                "id": call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": tool_call_data["name"],
-                                    "arguments": arguments_str,
-                                },
-                            }
-                        ]
-                    },
+                    "delta": {"tool_calls": tool_calls_delta},
                     "finish_reason": None,
                 }
             ],

@@ -34,3 +34,32 @@ def test_post_tool_guard_not_added_without_tool_mode():
     out = server._apply_post_tool_guard(messages, has_tools=False)
 
     assert out == messages
+
+
+def test_enforce_write_before_mail_delete_blocks_delete_without_write():
+    calls = [
+        {"name": "exec", "arguments": {"command": "& $wrapper message delete 257"}},
+        {"name": "exec", "arguments": {"command": "Get-Date"}},
+    ]
+
+    out, blocked = server._enforce_write_before_mail_delete(calls)
+
+    # delete blockiert, normales exec bleibt
+    assert blocked is True
+    assert len(out) == 1
+    assert out[0]["name"] == "exec"
+    assert "Get-Date" in out[0]["arguments"]["command"]
+
+
+def test_enforce_write_before_mail_delete_allows_delete_after_write():
+    calls = [
+        {"name": "write", "arguments": {"path": "WEB-ADMIN.md", "content": "ok"}},
+        {"name": "exec", "arguments": {"command": "& $wrapper message delete 257"}},
+    ]
+
+    out, blocked = server._enforce_write_before_mail_delete(calls)
+
+    assert blocked is False
+    assert len(out) == 2
+    assert out[0]["name"] == "write"
+    assert out[1]["name"] == "exec"
