@@ -63,3 +63,28 @@ def test_enforce_write_before_mail_delete_allows_delete_after_write():
     assert len(out) == 2
     assert out[0]["name"] == "write"
     assert out[1]["name"] == "exec"
+
+
+def test_enforce_write_before_mail_delete_blocks_move_to_trash_without_write():
+    calls = [
+        {"name": "exec", "arguments": {"command": "& $wrapper message move \"Trash\" 257"}},
+    ]
+
+    out, blocked = server._enforce_write_before_mail_delete(calls)
+
+    assert blocked is True
+    assert out == []
+
+
+def test_enforce_write_before_mail_delete_allows_move_to_trash_after_edit():
+    calls = [
+        {"name": "edit", "arguments": {"path": "WEB-ADMIN.md", "old_string": "a", "new_string": "b"}},
+        {"name": "exec", "arguments": {"command": "& $wrapper message move \"Trash\" 257"}},
+    ]
+
+    out, blocked = server._enforce_write_before_mail_delete(calls)
+
+    assert blocked is False
+    assert len(out) == 2
+    assert out[0]["name"] == "edit"
+    assert out[1]["name"] == "exec"

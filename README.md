@@ -11,6 +11,12 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 - Tool-call emulation (JSON-mode): ✅
 - SSE-style streaming emulation: ✅
 
+### Planned / open features
+
+- Skill snippets on vector basis: 🔴
+- TailoredAI RAG interface (per API docs, short re-check): 🔴
+- Cost/usage monitoring via API cost endpoint: 🔴
+
 ## Why this proxy exists
 
 AcademicAI does not provide native OpenAI function-calling/tool-calling in the same way OpenAI-compatible clients expect.
@@ -129,6 +135,23 @@ Notes:
 - Injection runs only in tool mode (`tools`/`functions` present).
 - Snippets are selected by topic match against the latest user message.
 
+### Optional self-learning snippet updates (variant 1, keyword-based)
+
+The proxy can auto-update `skill_snippets.json` from successful tool-call decisions.
+This is intentionally simple (no vector DB / no embeddings):
+- derive keywords from the latest user request
+- upsert `auto:<tool_name>` snippets
+- increase hit counters and extend topics over time
+
+Env flags:
+- `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=true|false`
+- `ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL=6`
+- `ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN=4`
+
+Notes:
+- Learning runs only when tool mode is active and a tool call was actually emitted.
+- Existing manual snippets are preserved; auto snippets are marked with `source: "auto"`.
+
 ## Notes for OpenClaw users
 
 If you want proxy defaults to control style, do **not** hard-set these in OpenClaw for this provider:
@@ -160,7 +183,7 @@ if the latest tool result is clearly incomplete.
 ### Mail-delete safety guard (write-before-delete)
 
 For mailbox workflows, the proxy enforces this batch rule:
-- `exec` calls containing `message delete` or `message move ... Cabinet`
+- `exec` calls containing `message delete` or any `message move ...`
   are allowed only if a prior `write` or `edit` call exists in the same
   tool-call batch.
 
@@ -200,6 +223,14 @@ academicai-proxy/
   requirements.txt
   README.md
 ```
+
+## Contributing / Upstream bugfixes
+
+If your agent or team uses this proxy in production and you patch a bug,
+please contribute it upstream so others benefit too:
+- GitHub: <https://github.com/martinderm/AcademicAI-Proxy>
+
+(If the repository URL changes, update this section accordingly.)
 
 ## License
 

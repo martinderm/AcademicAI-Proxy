@@ -19,6 +19,7 @@ import time
 import uuid
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -155,19 +156,130 @@ def _inject_skill_snippet_context(messages: list, user_text: str) -> list:
     return [msg] + messages
 
 
+def _save_skill_snippets(snippets: list) -> None:
+    p = Path(SKILL_SNIPPETS_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(snippets, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _extract_learning_topics(user_text: str, limit: int) -> list[str]:
+    """Leitet einfache Themen-Keywords aus User-Text ab (Variante 1, ohne Embeddings)."""
+    if not user_text:
+        return []
+
+    stopwords = {
+        "aber", "alle", "alles", "auch", "bitte", "dann", "dass", "deine", "deinen", "deiner",
+        "dem", "den", "der", "des", "die", "ein", "eine", "einer", "eines", "es", "für", "gibt",
+        "haben", "hier", "ich", "ihr", "ihre", "ihren", "ist", "kann", "können", "mal", "mit",
+        "nach", "noch", "oder", "schon", "sehr", "sind", "so", "und", "uns", "von", "was", "wie",
+        "wir", "wird", "wurde", "you", "your", "from", "that", "this", "have", "just", "tool",
+    }
+
+    words = re.findall(r"[a-zA-Z0-9äöüÄÖÜß_-]+", user_text.lower())
+    ranked = []
+    seen = set()
+    for w in words:
+        if len(w) < max(2, AUTO_SKILL_MIN_TOPIC_LEN):
+            continue
+        if w in stopwords:
+            continue
+        if w in seen:
+            continue
+        seen.add(w)
+        ranked.append(w)
+        if len(ranked) >= max(1, limit):
+            break
+    return ranked
+
+
+def _upsert_auto_skill_snippet(snippets: list, tool_name: str, topics: list[str]) -> tuple[list, bool]:
+    """Upsert für auto-generierte Snippets; erweitert Topics und Hit-Counter."""
+    if not tool_name:
+        return snippets, False
+
+    sid = f"auto:{tool_name}"
+    changed = False
+
+    for s in snippets:
+        if s.get("id") == sid:
+            existing_topics = [str(t).lower() for t in (s.get("topics") or []) if str(t).strip()]
+            merged = list(existing_topics)
+            for t in topics:
+                tl = str(t).lower().strip()
+                if tl and tl not in merged:
+                    merged.append(tl)
+                    changed = True
+            s["topics"] = merged
+            s["source"] = "auto"
+            s["hits"] = int(s.get("hits", 0)) + 1
+            s["last_updated"] = int(time.time())
+            changed = True
+            return snippets, changed
+
+    new_entry = {
+        "id": sid,
+        "source": "auto",
+        "hits": 1,
+        "last_updated": int(time.time()),
+        "topics": [str(t).lower().strip() for t in topics if str(t).strip()],
+        "snippet": (
+            f"If this intent appears, prefer tool `{tool_name}` first. "
+            "If tool output is insufficient, run a minimal follow-up tool call and then return a concise final answer."
+        ),
+    }
+    snippets.append(new_entry)
+    return snippets, True
+
+
+def _learn_skill_snippets_from_tool_calls(user_text: str, tool_calls: list[dict]) -> None:
+    """Self-learning (Variante 1): keyword-basiertes Upsert in skill_snippets.json."""
+    if not ENABLE_AUTO_SKILL_LEARNING:
+        return
+    if not tool_calls:
+        return
+
+    topics = _extract_learning_topics(user_text, limit=AUTO_SKILL_TOPICS_PER_CALL)
+    if not topics:
+        return
+
+    tool_names = []
+    for c in tool_calls:
+        name = str((c or {}).get("name", "")).strip()
+        if name and name not in tool_names:
+            tool_names.append(name)
+
+    if not tool_names:
+        return
+
+    try:
+        snippets = _load_skill_snippets()
+        changed_any = False
+        for name in tool_names:
+            snippets, changed = _upsert_auto_skill_snippet(snippets, name, topics)
+            changed_any = changed_any or changed
+
+        if changed_any:
+            _save_skill_snippets(snippets)
+            log.info(f"skill snippet self-learning: updated tools={tool_names} topics={topics}")
+    except Exception as e:
+        log.warning(f"skill snippet self-learning failed: {e}")
+
+
 def _is_mail_delete_exec_call(call: dict) -> bool:
     """Erkennt exec-Calls, die Himalaya-Mails löschen/verschieben."""
     if not isinstance(call, dict) or call.get("name") != "exec":
         return False
     args = call.get("arguments") or {}
     cmd = str(args.get("command", "")).lower()
-    return ("message delete" in cmd) or ("message move" in cmd and "cabinet" in cmd)
+    # Sicherheitsrelevant: alle delete/move Varianten (inkl. Trash/Cabinet/andere Ordner)
+    return ("message delete" in cmd) or ("message move" in cmd)
 
 
 def _enforce_write_before_mail_delete(tool_calls: list[dict]) -> tuple[list[dict], bool]:
     """
     Safety-Guard für Batch-Tool-Calls:
-    Mail-Delete/Move darf in derselben Batch nur passieren, wenn vorher ein write/edit Call enthalten ist.
+    Mail-Delete/Move (in beliebige Ordner, inkl. Trash/Cabinet) darf in derselben Batch
+    nur passieren, wenn vorher ein write/edit Call enthalten ist.
 
     Returns: (filtered_calls, blocked_any)
     """
@@ -271,6 +383,11 @@ HUMANIZATION_TEMPERATURE = float(os.environ.get("ACADEMICAI_HUMANIZATION_TEMPERA
 ENABLE_SKILL_SNIPPETS = os.environ.get("ACADEMICAI_ENABLE_SKILL_SNIPPETS", "false").lower() in ("1", "true", "yes", "on")
 SKILL_SNIPPETS_FILE = os.environ.get("ACADEMICAI_SKILL_SNIPPETS_FILE", str(Path(__file__).with_name("skill_snippets.json")))
 SKILL_SNIPPETS_MAX = int(os.environ.get("ACADEMICAI_SKILL_SNIPPETS_MAX", "1"))
+
+# Optional: self-learning updates for skill_snippets.json (keyword-basiert, ohne Vektor-Index)
+ENABLE_AUTO_SKILL_LEARNING = os.environ.get("ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING", "false").lower() in ("1", "true", "yes", "on")
+AUTO_SKILL_TOPICS_PER_CALL = int(os.environ.get("ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL", "6"))
+AUTO_SKILL_MIN_TOPIC_LEN = int(os.environ.get("ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN", "4"))
 
 
 def _build_humanization_messages(original_user_query: str, structured_content: str) -> list:
@@ -464,6 +581,7 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
             tool_calls_data, blocked_unsafe_delete = _enforce_write_before_mail_delete(tool_calls_data)
             names = [c.get("name", "?") for c in tool_calls_data]
             log.info(f"tool_call(s) detected: count={len(tool_calls_data)} names={names}")
+            _learn_skill_snippets_from_tool_calls(original_user_query, tool_calls_data)
         else:
             # Kein Tool-Call — entweder {"action":"respond",...} oder Fallback
             extracted = extract_respond_content(content)
