@@ -2,7 +2,7 @@
 import json, urllib.request
 
 PROXY = "http://127.0.0.1:11435/v1/chat/completions"
-KEY   = "academicai-proxy-boku"
+KEY   = "test-proxy-key"
 
 messages = [
     {"role": "system", "content": "Du bist Dagobert, ein hilfreicher Assistent."},

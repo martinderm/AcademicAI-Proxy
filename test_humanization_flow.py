@@ -74,7 +74,7 @@ def test_humanization_pass_fallback_on_error():
 def test_humanization_prompt_contains_original_question_and_data():
     msgs = server._build_humanization_messages(
         original_user_query="Was weißt du über Zoom-Räume?",
-        structured_content='{"rooms":[{"name":"BOKU LLL internal"}]}'
+        structured_content='{"rooms":[{"name":"Internal Room"}]}'
     )
     assert len(msgs) == 2
     assert msgs[0]["role"] == "system"

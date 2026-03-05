@@ -1,7 +1,7 @@
 """
 Test aller AcademicAI-Modelle via Proxy — exaktes OpenClaw-Request-Format.
 
-Basiert auf last_request.json (echter OpenClaw-Request von boku-lll-guru).
+Basiert auf last_request.json (echter OpenClaw-Request von sample-agent).
 Keys die OpenClaw schickt: model, messages, stream, stream_options, store, max_completion_tokens, tools
 - tools, stream_options, store werden vom Proxy gefiltert
 - content als list wird in text extrahiert
@@ -10,9 +10,9 @@ Keys die OpenClaw schickt: model, messages, stream, stream_options, store, max_c
 import json, urllib.request
 
 PROXY = "http://127.0.0.1:11435/v1/chat/completions"
-KEY   = "academicai-proxy-boku"
+KEY   = "test-proxy-key"
 
-SYSTEM = "Du bist Ivan, ein hilfreicher KI-Assistent fuer die BOKU Wien im Bereich Lebenslanges Lernen."
+SYSTEM = "Du bist ein hilfreicher KI-Assistent fuer allgemeine Aufgaben."
 MODELS = ["gpt-4o", "o3", "gpt-5-nano", "gpt-5-mini", "gpt-5", "Mistral-Large-3"]
 
 # Realistisches OpenClaw-Format inkl. aller problematischen Felder

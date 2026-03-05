@@ -51,6 +51,14 @@ Proxy -> AcademicAI backend:
 
 Configure these values in `.env` (never commit real secrets).
 
+## Tenant separation (generic repo vs external tenant config)
+
+Keep repository content generic. Put tenant-specific values outside the repository:
+- `.env` with endpoint, client ID/secret, proxy API key
+- optional tenant snippets file via `ACADEMICAI_SKILL_SNIPPETS_FILE`
+
+Templates are provided under `docs/tenant-template/`.
+
 ## Quick start
 
 ```bash
@@ -66,6 +74,30 @@ py server.py
 # or
 .\start_server.ps1
 ```
+
+## Recommended workflow: let an AI agent install it from this GitHub URL
+
+This repository is structured so both humans and LLM agents can install it reliably.
+Recommended approach: give your coding agent the GitHub URL and ask it to perform setup + verification.
+
+Suggested instruction you can paste to an agent:
+
+```text
+Install and verify this repository as a local service:
+1) clone repo
+2) create .env from .env.example
+3) fill ACADEMICAI_BASE_URL, ACADEMICAI_CLIENT_ID, ACADEMICAI_CLIENT_SECRET, ACADEMICAI_PROXY_API_KEY
+4) install dependencies
+5) start server
+6) verify /health and /v1/models with Bearer auth
+7) run pytest
+8) report final status and exact local run command
+```
+
+Minimum verification checks:
+- `GET /health` returns `{"status":"ok"...}`
+- `GET /v1/models` works with `Authorization: Bearer <ACADEMICAI_PROXY_API_KEY>`
+- `py -m pytest -q` passes
 
 ## Supported request parameters (`POST /v1/chat/completions`)
 

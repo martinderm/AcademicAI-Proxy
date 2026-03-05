@@ -1,0 +1,7 @@
+[
+  {
+    "id": "mailbox-himalaya",
+    "topics": ["mail", "mailbox", "inbox", "email"],
+    "snippet": "For mailbox status/questions, use exec with the configured wrapper first instead of assumptions."
+  }
+]

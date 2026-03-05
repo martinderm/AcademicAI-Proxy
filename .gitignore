@@ -1,5 +1,7 @@
 .env
 .env.local
+*.local.json
+/tenant_overrides*.json
 
 # Python
 __pycache__/

@@ -5,7 +5,7 @@ Testet: system message im messages array + top-level system parameter.
 import json, urllib.request
 
 PROXY = "http://127.0.0.1:11435/v1/chat/completions"
-KEY   = "academicai-proxy-boku"
+KEY   = "test-proxy-key"
 MODEL = "gpt-5"
 
 BIG_SYSTEM = """Du bist Dagobert, ein KI-Assistent. Du hilfst Martin bei IT-Aufgaben.

@@ -1,7 +1,7 @@
 [
   {
-    "id": "himalaya-mailbox-boku-lll",
-    "topics": ["mail", "mailbox", "inbox", "email", "e-mail", "wordpress", "himalaya", "boku-lll"],
-    "snippet": "For mailbox status/questions in BOKU context, use exec with Himalaya wrapper first instead of assumptions. Wrapper path: skills/himalaya-boku-lll/scripts/himalaya-boku-lll-wrapper.ps1. IMPORTANT syntax: put options BEFORE search query. Correct: '& $wrapper envelope list -s 50 \"from wordpress@usage-ng.boku.ac.at\"'. Also valid: '& $wrapper envelope list -s 20'. Do not use query before '-s'. IMPORTANT move/copy order: target first, then ID(s): '& $wrapper message move \"Trash\" 255' (NOT '255 Trash'). BOKU GroupWise rule (imap.boku.ac.at, all BOKU mailboxes): do NOT use message move/delete for cleanup; prefer '& $wrapper message copy \"Trash\" <ID>' and then verify. If tool output contains 'Error:' or 'cannot parse', do not claim success: correct the command and retry once."
+    "id": "mailbox-himalaya",
+    "topics": ["mail", "mailbox", "inbox", "email", "e-mail", "himalaya"],
+    "snippet": "For mailbox status/questions, use exec with the configured Himalaya wrapper first instead of assumptions. IMPORTANT syntax: put options BEFORE search query. Correct: '& $wrapper envelope list -s 50 \"from alerts@example.com\"'. Also valid: '& $wrapper envelope list -s 20'. Do not use query before '-s'. IMPORTANT move/copy order: target first, then ID(s): '& $wrapper message move \"Trash\" 255' (NOT '255 Trash'). If tool output contains 'Error:' or 'cannot parse', do not claim success: correct the command and retry once."
   }
 ]

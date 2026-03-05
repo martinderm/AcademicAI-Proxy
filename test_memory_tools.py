@@ -13,7 +13,7 @@ import json, time
 import httpx
 
 BASE = "http://127.0.0.1:11435"
-HEADERS = {"Authorization": "Bearer academicai-proxy-boku", "Content-Type": "application/json"}
+HEADERS = {"Authorization": "Bearer test-proxy-key", "Content-Type": "application/json"}
 MODEL = "gpt-5-mini"
 
 # Realistische OpenClaw Tool-Definitionen (Subset, wie OpenClaw sie sendet)
@@ -199,7 +199,7 @@ messages = [
         "role": "tool",
         "tool_call_id": "call_mem001",
         "content": json.dumps([
-            {"score": 0.95, "path": "MEMORY.md#12", "text": "AcademicAI Proxy: FastAPI auf Port 11435, OpenAI-kompatibel, API-Key academicai-proxy-boku. Auto-Start via Scheduled Task."},
+            {"score": 0.95, "path": "MEMORY.md#12", "text": "AcademicAI Proxy: FastAPI auf Port 11435, OpenAI-kompatibel, API-Key test-proxy-key. Auto-Start via Scheduled Task."},
             {"score": 0.88, "path": "memory/2026-02-24.md#45", "text": "Tool-Call-Emulation implementiert via JSON-Mode (Strategie A). Alle 4 Tests gruen."},
         ], ensure_ascii=False),
     },

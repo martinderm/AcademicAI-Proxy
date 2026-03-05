@@ -14,7 +14,7 @@ import httpx
 import time
 
 BASE = "http://127.0.0.1:11435"
-HEADERS = {"Authorization": "Bearer academicai-proxy-boku", "Content-Type": "application/json"}
+HEADERS = {"Authorization": "Bearer test-proxy-key", "Content-Type": "application/json"}
 MODEL = "gpt-5-mini"
 
 SAMPLE_TOOLS = [
@@ -197,7 +197,7 @@ time.sleep(2)
 
 run_test(
     label="5. Grenzfall — könnte Tool sein oder nicht",
-    user_msg="Was weißt du über die BOKU Wien?",
+    user_msg="Was weisst du ueber die Universitaet Wien?",
     expect_action=None,  # beides akzeptabel
 )
 time.sleep(2)

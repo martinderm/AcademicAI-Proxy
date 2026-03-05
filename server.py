@@ -88,7 +88,7 @@ def _apply_post_tool_guard(messages: list, has_tools: bool) -> list:
         guard_text = (
             "TOOL_RESULT_ERROR: The latest tool result contains an error. "
             "Do NOT claim success. Either issue a corrected tool_call, or explain the failure clearly. "
-            "For Himalaya envelope search, keep options before query, e.g. envelope list -s 50 \"from wordpress@usage-ng.boku.ac.at\"."
+            "For mailbox envelope search, keep options before query, e.g. envelope list -s 50 \"from alerts@example.com\"."
         )
     else:
         guard_text = (
@@ -433,7 +433,7 @@ log = logging.getLogger("academicai-proxy")
 
 app = FastAPI(
     title="AcademicAI Proxy",
-    description="OpenAI-kompatibler Proxy für AcademicAI (BOKU)",
+    description="OpenAI-kompatibler Proxy für AcademicAI",
     version="1.0.0",
 )
 

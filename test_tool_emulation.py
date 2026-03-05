@@ -13,7 +13,7 @@ import httpx
 import time
 
 BASE = "http://127.0.0.1:11435"
-HEADERS = {"Authorization": "Bearer academicai-proxy-boku", "Content-Type": "application/json"}
+HEADERS = {"Authorization": "Bearer test-proxy-key", "Content-Type": "application/json"}
 MODEL = "gpt-5-mini"  # günstigstes Modell für Tests
 
 
@@ -145,7 +145,7 @@ r_stream = httpx.post(
     json={
         "model": MODEL,
         "messages": [
-            {"role": "user", "content": "Suche im Web nach 'BOKU Wien'. Nutze das web_search Tool."}
+            {"role": "user", "content": "Suche im Web nach 'Universitaet Wien'. Nutze das web_search Tool."}
         ],
         "tools": SAMPLE_TOOLS,
         "stream": True,
@@ -183,7 +183,7 @@ print("\n=== Test 4: Tool-Result Konversation ===")
 r = post({
     "model": MODEL,
     "messages": [
-        {"role": "user", "content": "Suche nach 'BOKU Wien'. Nutze web_search."},
+        {"role": "user", "content": "Suche nach 'Universitaet Wien'. Nutze web_search."},
         {
             "role": "assistant",
             "content": None,
@@ -193,7 +193,7 @@ r = post({
                     "type": "function",
                     "function": {
                         "name": "web_search",
-                        "arguments": '{"query": "BOKU Wien"}',
+                        "arguments": '{"query": "Universitaet Wien"}',
                     },
                 }
             ],
@@ -201,7 +201,7 @@ r = post({
         {
             "role": "tool",
             "tool_call_id": "call_test001",
-            "content": "Result: BOKU Wien ist die Universität für Bodenkultur. Website: boku.ac.at",
+            "content": "Result: Die Universität Wien ist eine öffentliche Universität in Österreich. Website: univie.ac.at",
         },
     ],
     "tools": SAMPLE_TOOLS,
@@ -303,7 +303,7 @@ print_result("Alle Messy-JSON-Tests bestanden", all_ok)
 # Hintergrund: Das Modell gibt manchmal valides JSON aus, das weder
 # action=tool_call noch action=respond ist (z.B. einen JSON-Plan).
 # Der Proxy soll das als Markdown-Codeblock formatieren statt rohen JSON-String
-# durchzureichen. (Gefunden: boku-lll-guru Heartbeat 2026-02-27.)
+# durchzureichen. (Gefunden: sample-agent Heartbeat 2026-02-27.)
 
 print("\n=== Test 6a: Arbitrary-JSON-Fallback (Unit) ===")
 from academicai.tool_emulation import format_arbitrary_json_as_codeblock
