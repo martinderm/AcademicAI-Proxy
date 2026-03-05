@@ -679,5 +679,5 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
 
 if __name__ == "__main__":
     log.info(f"AcademicAI Proxy startet auf Port {PORT}")
-    log.info(f"API-Key: {API_KEY}")
+    log.info("API-Key configured: yes")
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
