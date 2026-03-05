@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3 - 2026-03-05
+- Public release hardening and tenant-neutralization pass.
+- Removed tenant-specific/BOKU references from tracked code, docs, snippets, and tests.
+- `.env.example` made generic (`ACADEMICAI_BASE_URL` placeholder), added `ACADEMICAI_PROXY_API_KEY` and `TENANT_ID` examples.
+- Added agent-friendly installation guidance to `README.md` (recommended GitHub-URL handoff workflow + verification checklist).
+- Added tenant templates under `docs/tenant-template/` (`env.template`, `skill_snippets.template.json`).
+- Added `pytest` to `requirements.txt` so test execution is part of standard installation flow.
+- Security logging fix: removed clear-text API key logging at startup (CodeQL finding remediation).
+- Test suite re-run after changes: `19 passed`.
+
 ## 0.1.2 - 2026-02-28
 - Added optional self-learning updates for `skill_snippets.json` (variant 1, keyword-based).
   - New env flags:
