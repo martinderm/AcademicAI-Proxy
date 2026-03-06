@@ -20,8 +20,13 @@ import uuid
 import json
 import logging
 import re
+import asyncio
+import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+import httpx
 
 sys.path.insert(0, os.path.dirname(__file__))
 
@@ -29,12 +34,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Depends
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.concurrency import run_in_threadpool
 import uvicorn
 
 import academicai
+from academicai.auth import get_base_url, get_headers
 from academicai.tool_emulation import (
     inject_tools_into_messages,
     parse_tool_calls,
@@ -389,6 +395,171 @@ ENABLE_AUTO_SKILL_LEARNING = os.environ.get("ACADEMICAI_ENABLE_AUTO_SKILL_LEARNI
 AUTO_SKILL_TOPICS_PER_CALL = int(os.environ.get("ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL", "6"))
 AUTO_SKILL_MIN_TOPIC_LEN = int(os.environ.get("ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN", "4"))
 
+# Optional: Cost API cache (doku-konform via /api/v1/cost)
+# Standardmäßig deaktiviert; aktiviert nur mit ACADEMICAI_ENABLE_COST_MONITORING=true
+ENABLE_COST_MONITORING = os.environ.get("ACADEMICAI_ENABLE_COST_MONITORING", "false").lower() in ("1", "true", "yes", "on")
+COST_CACHE_FILE = os.environ.get("ACADEMICAI_COST_CACHE_FILE", str(Path(__file__).with_name("cost_cache.json")))
+COST_CACHE_TTL_SECONDS = max(60, int(os.environ.get("ACADEMICAI_COST_CACHE_TTL_SECONDS", "600")))
+COST_REFRESH_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS", "8")))
+
+_cost_lock = threading.Lock()
+_cost_refresh_in_flight = False
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso_ts(raw: str) -> Optional[datetime]:
+    if not raw:
+        return None
+    try:
+        value = raw.replace("Z", "+00:00")
+        return datetime.fromisoformat(value)
+    except Exception:
+        return None
+
+
+def _safe_float(value) -> Optional[float]:
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _extract_cost_summary(payload: dict) -> dict:
+    root = payload if isinstance(payload, dict) else {}
+    data = root.get("data") if isinstance(root.get("data"), dict) else root
+
+    total_cost = _safe_float(data.get("totalCost"))
+    total_clients = data.get("totalClients")
+    costs = data.get("costs") if isinstance(data.get("costs"), list) else []
+
+    try:
+        total_clients = int(total_clients) if total_clients is not None else None
+    except Exception:
+        total_clients = None
+
+    return {
+        "total_cost": total_cost,
+        "total_clients": total_clients,
+        "cost_entries": len(costs),
+    }
+
+
+def _read_cost_cache() -> dict:
+    p = Path(COST_CACHE_FILE)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_cost_cache(cache: dict) -> None:
+    p = Path(COST_CACHE_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _is_cost_cache_stale(cache: dict) -> bool:
+    ts = _parse_iso_ts(str(cache.get("updated_at", "")))
+    if ts is None:
+        return True
+    return (datetime.now(timezone.utc) - ts).total_seconds() > COST_CACHE_TTL_SECONDS
+
+
+def _build_cost_headers(cache: dict) -> dict:
+    if not ENABLE_COST_MONITORING:
+        return {}
+    if not cache:
+        return {}
+    headers = {
+        "X-AcademicAI-Cost-Stale": "true" if _is_cost_cache_stale(cache) else "false",
+    }
+    updated_at = str(cache.get("updated_at", "")).strip()
+    if updated_at:
+        headers["X-AcademicAI-Cost-Updated-At"] = updated_at
+
+    total_cost = _safe_float(cache.get("total_cost"))
+    if total_cost is not None:
+        headers["X-AcademicAI-Total-Cost"] = f"{total_cost:.6f}".rstrip("0").rstrip(".")
+
+    total_clients = cache.get("total_clients")
+    if isinstance(total_clients, int):
+        headers["X-AcademicAI-Total-Clients"] = str(total_clients)
+
+    cost_entries = cache.get("cost_entries")
+    if isinstance(cost_entries, int):
+        headers["X-AcademicAI-Cost-Entries"] = str(cost_entries)
+
+    return headers
+
+
+def _fetch_cost_snapshot() -> dict:
+    if not ENABLE_COST_MONITORING:
+        return {}
+
+    base_url = get_base_url().rstrip("/")
+    cost_url = f"{base_url}/api/v1/cost"
+    headers = dict(get_headers() or {})
+    headers.setdefault("Accept", "application/json")
+
+    with httpx.Client(timeout=COST_REFRESH_TIMEOUT_SECONDS, follow_redirects=True) as client:
+        resp = client.get(cost_url, headers=headers)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    summary = _extract_cost_summary(payload)
+    return {
+        "updated_at": _now_utc_iso(),
+        "source": "live",
+        "raw": payload,
+        **summary,
+    }
+
+
+def _refresh_cost_cache_sync() -> dict:
+    if not ENABLE_COST_MONITORING:
+        return _read_cost_cache()
+
+    with _cost_lock:
+        fresh = _fetch_cost_snapshot()
+        if fresh:
+            _write_cost_cache(fresh)
+        return fresh
+
+
+async def _refresh_cost_cache_background() -> None:
+    global _cost_refresh_in_flight
+    try:
+        await run_in_threadpool(_refresh_cost_cache_sync)
+    except Exception as e:
+        log.warning(f"cost refresh failed: {e}")
+    finally:
+        _cost_refresh_in_flight = False
+
+
+def _get_cost_cache_with_lazy_refresh() -> dict:
+    global _cost_refresh_in_flight
+    cache = _read_cost_cache()
+
+    if not ENABLE_COST_MONITORING:
+        return cache
+
+    if _is_cost_cache_stale(cache) and not _cost_refresh_in_flight:
+        try:
+            loop = asyncio.get_running_loop()
+            _cost_refresh_in_flight = True
+            loop.create_task(_refresh_cost_cache_background())
+        except RuntimeError:
+            # Kein laufender Loop (z.B. in unit tests) -> synchron vermeiden
+            pass
+
+    return cache
+
 
 def _build_humanization_messages(original_user_query: str, structured_content: str) -> list:
     """Prompt für den optionalen zweiten LLM-Pass (Humanisierung)."""
@@ -453,6 +624,20 @@ def health():
     return {"status": "ok", "service": "academicai-proxy"}
 
 
+@app.get("/internal/cost-status")
+def cost_status(key: str = Depends(verify_key)):
+    cache = _get_cost_cache_with_lazy_refresh()
+    return {
+        "enabled": ENABLE_COST_MONITORING,
+        "total_cost": _safe_float(cache.get("total_cost")),
+        "total_clients": cache.get("total_clients"),
+        "cost_entries": cache.get("cost_entries"),
+        "updated_at": cache.get("updated_at"),
+        "is_stale": _is_cost_cache_stale(cache) if cache else True,
+        "source": cache.get("source", "cache" if cache else "none"),
+    }
+
+
 # --- Models ---
 
 @app.get("/v1/models")
@@ -513,6 +698,8 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
 
     want_stream = bool(body.get("stream"))
     human_target_hint = _is_human_readable_target(messages)
+    cost_cache = _get_cost_cache_with_lazy_refresh()
+    response_headers = _build_cost_headers(cost_cache)
 
     # Optionale Parameter weiterreichen — nur bekannte, AcademicAI-sichere Felder
     # tools / tool_choice / functions werden via Prompt-Injection emuliert (nicht nativ weitergegeben)
@@ -653,26 +840,32 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
                 yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish_reason}], 'usage': usage})}\n\n"
             yield "data: [DONE]\n\n"
 
-        return StreamingResponse(sse_generator(), media_type="text/event-stream")
+        return StreamingResponse(sse_generator(), media_type="text/event-stream", headers=response_headers)
 
     # Kein Streaming: normaler JSON-Response
     if tool_calls_data:
-        return build_tool_calls_response(completion_id, created_ts, resp_model, tool_calls_data, usage)
+        return JSONResponse(
+            content=build_tool_calls_response(completion_id, created_ts, resp_model, tool_calls_data, usage),
+            headers=response_headers,
+        )
 
-    return {
-        "id": completion_id,
-        "object": "chat.completion",
-        "created": created_ts,
-        "model": resp_model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": finish_reason,
-            }
-        ],
-        "usage": usage,
-    }
+    return JSONResponse(
+        content={
+            "id": completion_id,
+            "object": "chat.completion",
+            "created": created_ts,
+            "model": resp_model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": finish_reason,
+                }
+            ],
+            "usage": usage,
+        },
+        headers=response_headers,
+    )
 
 
 # --- Start ---

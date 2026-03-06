@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4 - 2026-03-06
+- Cost monitoring switched to explicit opt-in via `ACADEMICAI_ENABLE_COST_MONITORING` (default `false`).
+- When disabled, proxy performs no automatic calls to AcademicAI `/api/v1/cost` and emits no cost headers.
+- Cost status/header schema aligned to API docs (`totalCost`, `totalClients`, `costs[]` count) instead of inferred `remaining_credit`.
+- Added/updated tests:
+  - `test_cost_headers.py` (doc-aligned cost headers)
+  - `test_cost_monitoring_toggle.py` (headers absent when monitoring disabled)
+- `.env.example` extended with cost-monitoring flags and default-off guidance.
+- README updated with a dedicated cost-monitoring section, explicit "currently untested" note, and required AcademicAI permission (`ACCESS_API_MONITOR_CREDIT`).
+
 ## 0.2.3 - 2026-03-05
 - Public release hardening and tenant-neutralization pass.
 - Removed tenant-specific/BOKU references from tracked code, docs, snippets, and tests.

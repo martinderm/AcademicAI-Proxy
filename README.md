@@ -185,6 +185,26 @@ Notes:
 - Learning runs only when tool mode is active and a tool call was actually emitted.
 - Existing manual snippets are preserved; auto snippets are marked with `source: "auto"`.
 
+### Optional cost monitoring (currently untested in this repo setup)
+
+Cost monitoring is **disabled by default** and does nothing unless explicitly enabled.
+No automatic `/api/v1/cost` calls are made when disabled.
+
+Env flags:
+- `ACADEMICAI_ENABLE_COST_MONITORING=true|false` (default: `false`)
+- `ACADEMICAI_COST_CACHE_FILE=./cost_cache.json`
+- `ACADEMICAI_COST_CACHE_TTL_SECONDS=600`
+- `ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS=8`
+
+Behavior when enabled:
+- Proxy lazily/background-refreshes cost cache from AcademicAI `GET /api/v1/cost`.
+- Adds response headers on chat completions (`X-AcademicAI-Total-Cost`, `X-AcademicAI-Total-Clients`, `X-AcademicAI-Cost-Entries`, `X-AcademicAI-Cost-Updated-At`, `X-AcademicAI-Cost-Stale`).
+- Exposes `GET /internal/cost-status`.
+
+Important prerequisites (per AcademicAI API docs):
+- API client permission `ACCESS_API_MONITOR_CREDIT` is required for `/api/v1/cost`.
+- Without that permission, the endpoint returns `403` and cache stays empty/stale.
+
 ## Notes for OpenClaw users
 
 If you want proxy defaults to control style, do **not** hard-set these in OpenClaw for this provider:
