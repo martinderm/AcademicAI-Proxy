@@ -250,14 +250,14 @@ Run smoke + functional tests:
 
 ```powershell
 py -m pytest -q
-py test_tool_emulation.py
-py -m pytest -q test_post_tool_guard.py
+py tests/test_tool_emulation.py
+py -m pytest -q tests/test_post_tool_guard.py
 ```
 
 Optional:
 
 ```powershell
-py test_openclaw_style.py
+py tests/test_openclaw_style.py
 ```
 
 ## Project layout
@@ -273,6 +273,9 @@ academicai-proxy/
     transformation.py
   server.py
   start_server.ps1
+  tests/
+    test_tool_emulation.py
+    ...
   requirements.txt
   README.md
 ```

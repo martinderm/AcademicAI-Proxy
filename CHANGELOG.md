@@ -5,8 +5,9 @@
 - When disabled, proxy performs no automatic calls to AcademicAI `/api/v1/cost` and emits no cost headers.
 - Cost status/header schema aligned to API docs (`totalCost`, `totalClients`, `costs[]` count) instead of inferred `remaining_credit`.
 - Added/updated tests:
-  - `test_cost_headers.py` (doc-aligned cost headers)
-  - `test_cost_monitoring_toggle.py` (headers absent when monitoring disabled)
+  - `tests/test_cost_headers.py` (doc-aligned cost headers)
+  - `tests/test_cost_monitoring_toggle.py` (headers absent when monitoring disabled)
+- Test suite files moved from repository root into `tests/` for cleaner project structure.
 - `.env.example` extended with cost-monitoring flags and default-off guidance.
 - README updated with a dedicated cost-monitoring section, explicit "currently untested" note, and required AcademicAI permission (`ACCESS_API_MONITOR_CREDIT`).
 
