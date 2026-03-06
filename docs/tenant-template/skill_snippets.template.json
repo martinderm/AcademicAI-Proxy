@@ -3,5 +3,10 @@
     "id": "mailbox-himalaya",
     "topics": ["mail", "mailbox", "inbox", "email"],
     "snippet": "For mailbox status/questions, use exec with the configured wrapper first instead of assumptions."
+  },
+  {
+    "id": "mail-processor-shadow",
+    "topics": ["mail-processor", "mail routing", "mail triage", "classification", "shadow"],
+    "snippet": "For mail classification/routing workflows, prefer the mail-processor skill wrappers and run shadow mode first before enabling routing."
   }
 ]
