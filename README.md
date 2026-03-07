@@ -161,8 +161,12 @@ before tool-emulation. This increases the chance of correct tool use for domain 
 
 Env flags:
 - `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false`
-- `ACADEMICAI_SKILL_SNIPPETS_FILE=./skill_snippets.json`
+- `ACADEMICAI_SKILL_SNIPPETS_FILE=./data/skill_snippets.json`
 - `ACADEMICAI_SKILL_SNIPPETS_MAX=1`
+
+Setup note:
+- `./data/skill_snippets.json` is **installation-specific runtime data** (especially if auto-learning is enabled) and is **not committed**.
+- To bootstrap, copy `./skill_snippets.example.json` → `./data/skill_snippets.json` (or point `ACADEMICAI_SKILL_SNIPPETS_FILE` to your own location).
 
 Notes:
 - Injection runs only in tool mode (`tools`/`functions` present).
@@ -170,7 +174,7 @@ Notes:
 
 ### Optional self-learning snippet updates (variant 1, keyword-based)
 
-The proxy can auto-update `skill_snippets.json` from successful tool-call decisions.
+The proxy can auto-update the *runtime* snippets file (default: `./data/skill_snippets.json`) from successful tool-call decisions.
 This is intentionally simple (no vector DB / no embeddings):
 - derive keywords from the latest user request
 - upsert `auto:<tool_name>` snippets

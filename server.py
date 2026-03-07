@@ -387,7 +387,12 @@ HUMANIZATION_TEMPERATURE = float(os.environ.get("ACADEMICAI_HUMANIZATION_TEMPERA
 
 # Optional: skill snippet retrieval/injection to improve tool-call reliability
 ENABLE_SKILL_SNIPPETS = os.environ.get("ACADEMICAI_ENABLE_SKILL_SNIPPETS", "false").lower() in ("1", "true", "yes", "on")
-SKILL_SNIPPETS_FILE = os.environ.get("ACADEMICAI_SKILL_SNIPPETS_FILE", str(Path(__file__).with_name("skill_snippets.json")))
+# NOTE: skill snippets are installation-specific runtime data (esp. with auto-learning enabled)
+# Default location is under ./data/ (relative to the working directory).
+SKILL_SNIPPETS_FILE = os.environ.get(
+    "ACADEMICAI_SKILL_SNIPPETS_FILE",
+    str(Path("data") / "skill_snippets.json"),
+)
 SKILL_SNIPPETS_MAX = int(os.environ.get("ACADEMICAI_SKILL_SNIPPETS_MAX", "1"))
 
 # Optional: self-learning updates for skill_snippets.json (keyword-basiert, ohne Vektor-Index)
@@ -398,7 +403,10 @@ AUTO_SKILL_MIN_TOPIC_LEN = int(os.environ.get("ACADEMICAI_AUTO_SKILL_MIN_TOPIC_L
 # Optional: Cost API cache (doku-konform via /api/v1/cost)
 # Standardmäßig deaktiviert; aktiviert nur mit ACADEMICAI_ENABLE_COST_MONITORING=true
 ENABLE_COST_MONITORING = os.environ.get("ACADEMICAI_ENABLE_COST_MONITORING", "false").lower() in ("1", "true", "yes", "on")
-COST_CACHE_FILE = os.environ.get("ACADEMICAI_COST_CACHE_FILE", str(Path(__file__).with_name("cost_cache.json")))
+COST_CACHE_FILE = os.environ.get(
+    "ACADEMICAI_COST_CACHE_FILE",
+    str(Path("data") / "cost_cache.json"),
+)
 COST_CACHE_TTL_SECONDS = max(60, int(os.environ.get("ACADEMICAI_COST_CACHE_TTL_SECONDS", "600")))
 COST_REFRESH_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS", "8")))
 

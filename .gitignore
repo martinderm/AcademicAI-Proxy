@@ -21,3 +21,8 @@ last_backend_request.json
 Thumbs.db
 .vscode/
 .idea/
+
+# Installation-specific runtime data
+/data/*.json
+/data/**/*.json
+skill_snippets.json
