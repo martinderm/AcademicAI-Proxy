@@ -13,9 +13,9 @@ import json
 import httpx
 import time
 
-BASE = "http://127.0.0.1:11435"
-HEADERS = {"Authorization": "Bearer test-proxy-key", "Content-Type": "application/json"}
-MODEL = "gpt-5-mini"
+from _local_env import BASE, MODEL, auth_headers
+
+HEADERS = auth_headers()
 
 SAMPLE_TOOLS = [
     {
@@ -91,7 +91,7 @@ def build_tool_list(tools):
     return "\n".join(lines)
 
 
-def post_json_mode(user_msg: str, tools=None) -> dict:
+def post_json_mode(user_msg: str, tools=None) -> httpx.Response:
     tool_list = build_tool_list(tools or SAMPLE_TOOLS)
     system = SYSTEM_PROMPT_TEMPLATE.format(tool_list=tool_list)
 

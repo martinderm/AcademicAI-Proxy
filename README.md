@@ -28,6 +28,7 @@ Tool-calling is **simulated**, not native. That means the model is guided via pr
 not by a backend-level function-calling engine.
 
 In practice this works well, but there are limits:
+
 - behavior is probabilistic (occasionally the model may answer in JSON style instead of ideal natural text)
 - extra guardrails are needed to avoid unnecessary repeated tool calls
 - reliability is generally lower than true native tool-calling APIs
@@ -43,9 +44,11 @@ So: good for practical use, but not mathematically deterministic.
 ## Authentication
 
 Client -> Proxy (Bearer):
+
 - `Authorization: Bearer <YOUR_PROXY_API_KEY>`
 
 Proxy -> AcademicAI backend:
+
 - `X-Client-ID: <ACADEMICAI_CLIENT_ID>`
 - `X-Client-Secret: <ACADEMICAI_CLIENT_SECRET>`
 
@@ -55,6 +58,7 @@ Startup fails fast when `ACADEMICAI_PROXY_API_KEY` is missing, insecure, or too 
 ## Tenant separation (generic repo vs external tenant config)
 
 Keep repository content generic. Put tenant-specific values outside the repository:
+
 - `.env` with endpoint, client ID/secret, proxy API key
 - optional tenant snippets file via `ACADEMICAI_SKILL_SNIPPETS_FILE`
 
@@ -68,7 +72,6 @@ cp .env.example .env
 # edit .env
 ```
 
-
 Run:
 
 ```powershell
@@ -77,6 +80,32 @@ py server.py
 .\start_server.ps1
 # optional controlled stop
 .\stop_server.ps1
+```
+
+## Local test environment
+
+The repository now includes a separate local test setup:
+
+- `.env.localtest` for local test defaults
+- `.env.localtest.example` as template
+- `.\start_test_server.ps1` to start the proxy with local test settings
+- `.\run_local_tests.ps1 -Mode offline` for local/offline regression tests
+- `.\run_local_tests.ps1 -Mode e2e` for end-to-end proxy tests against AcademicAI
+
+Offline mode:
+
+- does not require real AcademicAI backend credentials
+- validates hardening, request validation, guard logic, and humanization helpers
+
+E2E mode:
+
+- requires `ACADEMICAI_BASE_URL`, `ACADEMICAI_CLIENT_ID`, and `ACADEMICAI_CLIENT_SECRET` in `.env.localtest`
+- uses `ACADEMICAI_TEST_PROXY_API_KEY` / `ACADEMICAI_TEST_BASE_URL` from `.env.localtest` for the local proxy side
+
+Quick start for local testing:
+
+```powershell
+.\run_local_tests.ps1 -Mode offline
 ```
 
 ## Runtime hardening defaults
@@ -108,6 +137,7 @@ Install and verify this repository as a local service:
 ```
 
 Minimum verification checks:
+
 - `GET /health` returns `{"status":"ok"...}`
 - `GET /v1/models` works with `Authorization: Bearer <ACADEMICAI_PROXY_API_KEY>`
 - `py -m pytest -q` passes
@@ -115,10 +145,12 @@ Minimum verification checks:
 ## Supported request parameters (`POST /v1/chat/completions`)
 
 Required:
+
 - `model`
 - `messages`
 
 Forwarded when set:
+
 - `stream`
 - `temperature`
 - `max_tokens`
@@ -133,10 +165,12 @@ Forwarded when set:
 - `extra_body.tailoredAiId`
 
 Tool emulation input (not forwarded natively):
+
 - `tools` (alias: `functions`)
 - `tool_choice`
 
 Validation and protection behavior:
+
 - Invalid JSON body: `400`
 - Invalid request shape (e.g. wrong `messages` type): `422`
 - Oversized payload/tool schema/message content: `413`
@@ -153,6 +187,7 @@ These defaults apply only when the client did not set the field explicitly.
 - `ACADEMICAI_DEFAULT_TOOL_REASONING_EFFORT=low` (gpt-5* only)
 
 Rule:
+
 - Human conversation without tool mode -> chat defaults
 - Tool mode (`tools`/`functions` present) -> tool defaults
 - Explicit client fields always win
@@ -167,6 +202,7 @@ into natural human text.
 - Skipped when the model emits an actual tool call (`finish_reason: tool_calls`)
 
 Env flags:
+
 - `ACADEMICAI_ENABLE_HUMANIZATION_PASS=true|false`
 - `ACADEMICAI_HUMANIZATION_MODEL=<optional override>` (default: same model)
 - `ACADEMICAI_HUMANIZATION_TEMPERATURE=0.2`
@@ -178,15 +214,18 @@ before tool-emulation. This increases the chance of correct tool use for domain 
 (e.g. mailbox/email -> Himalaya wrapper commands).
 
 Env flags:
+
 - `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false`
 - `ACADEMICAI_SKILL_SNIPPETS_FILE=./data/skill_snippets.json`
 - `ACADEMICAI_SKILL_SNIPPETS_MAX=1`
 
 Setup note:
+
 - `./data/skill_snippets.json` is **installation-specific runtime data** (especially if auto-learning is enabled) and is **not committed**.
 - To bootstrap, copy `./skill_snippets.example.json` → `./data/skill_snippets.json` (or point `ACADEMICAI_SKILL_SNIPPETS_FILE` to your own location).
 
 Notes:
+
 - Injection runs only in tool mode (`tools`/`functions` present).
 - Snippets are selected by topic match against the latest user message.
 
@@ -194,16 +233,19 @@ Notes:
 
 The proxy can auto-update the *runtime* snippets file (default: `./data/skill_snippets.json`) from successful tool-call decisions.
 This is intentionally simple (no vector DB / no embeddings):
+
 - derive keywords from the latest user request
 - upsert `auto:<tool_name>` snippets
 - increase hit counters and extend topics over time
 
 Env flags:
+
 - `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=true|false`
 - `ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL=6`
 - `ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN=4`
 
 Notes:
+
 - Learning runs only when tool mode is active and a tool call was actually emitted.
 - Existing manual snippets are preserved; auto snippets are marked with `source: "auto"`.
 
@@ -213,23 +255,27 @@ Cost monitoring is **disabled by default** and does nothing unless explicitly en
 No automatic `/api/v1/cost` calls are made when disabled.
 
 Env flags:
+
 - `ACADEMICAI_ENABLE_COST_MONITORING=true|false` (default: `false`)
 - `ACADEMICAI_COST_CACHE_FILE=./cost_cache.json`
 - `ACADEMICAI_COST_CACHE_TTL_SECONDS=600`
 - `ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS=8`
 
 Behavior when enabled:
+
 - Proxy lazily/background-refreshes cost cache from AcademicAI `GET /api/v1/cost`.
 - Adds response headers on chat completions (`X-AcademicAI-Total-Cost`, `X-AcademicAI-Total-Clients`, `X-AcademicAI-Cost-Entries`, `X-AcademicAI-Cost-Updated-At`, `X-AcademicAI-Cost-Stale`).
 - Exposes `GET /internal/cost-status`.
 
 Important prerequisites (per AcademicAI API docs):
+
 - API client permission `ACCESS_API_MONITOR_CREDIT` is required for `/api/v1/cost`.
 - Without that permission, the endpoint returns `403` and cache stays empty/stale.
 
 ## Notes for OpenClaw users
 
 If you want proxy defaults to control style, do **not** hard-set these in OpenClaw for this provider:
+
 - `temperature`
 - `verbosity`
 - `reasoning_effort`
@@ -258,12 +304,14 @@ if the latest tool result is clearly incomplete.
 ### Mail-delete safety guard (write-before-delete)
 
 For mailbox workflows, the proxy enforces this batch rule:
+
 - `exec` calls containing `message delete` or any `message move ...`
   are allowed only if a prior `write` or `edit` call exists in the same
   tool-call batch.
 
 If such a delete/move is blocked and no safe tool call remains, the proxy returns
 plain text:
+
 - `Blocked unsafe mail action: message delete/move requires a prior write/edit in the same tool-call batch.`
 
 ## Tests
@@ -307,6 +355,7 @@ academicai-proxy/
 
 If your agent or team uses this proxy in production and you patch a bug,
 please contribute it upstream so others benefit too:
+
 - GitHub: <https://github.com/martinderm/AcademicAI-Proxy>
 
 (If the repository URL changes, update this section accordingly.)

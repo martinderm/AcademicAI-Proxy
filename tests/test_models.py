@@ -9,8 +9,10 @@ Keys die OpenClaw schickt: model, messages, stream, stream_options, store, max_c
 """
 import json, urllib.request
 
-PROXY = "http://127.0.0.1:11435/v1/chat/completions"
-KEY   = "test-proxy-key"
+from _local_env import BASE, API_KEY
+
+PROXY = f"{BASE}/v1/chat/completions"
+KEY   = API_KEY
 
 SYSTEM = "Du bist ein hilfreicher KI-Assistent fuer allgemeine Aufgaben."
 MODELS = ["gpt-4o", "o3", "gpt-5-nano", "gpt-5-mini", "gpt-5", "Mistral-Large-3"]

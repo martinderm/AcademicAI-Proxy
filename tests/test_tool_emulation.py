@@ -12,9 +12,9 @@ import json
 import httpx
 import time
 
-BASE = "http://127.0.0.1:11435"
-HEADERS = {"Authorization": "Bearer test-proxy-key", "Content-Type": "application/json"}
-MODEL = "gpt-5-mini"  # günstigstes Modell für Tests
+from _local_env import BASE, MODEL, auth_headers
+
+HEADERS = auth_headers()
 
 
 def post(payload: dict, stream: bool = False) -> httpx.Response:

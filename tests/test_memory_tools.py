@@ -12,9 +12,9 @@ Testet:
 import json, time
 import httpx
 
-BASE = "http://127.0.0.1:11435"
-HEADERS = {"Authorization": "Bearer test-proxy-key", "Content-Type": "application/json"}
-MODEL = "gpt-5-mini"
+from _local_env import BASE, MODEL, auth_headers
+
+HEADERS = auth_headers()
 
 # Realistische OpenClaw Tool-Definitionen (Subset, wie OpenClaw sie sendet)
 OPENCLAW_TOOLS = [
