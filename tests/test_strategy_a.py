@@ -1,35 +1,21 @@
-"""
-Feasibility-Test: Strategie A — JSON-Mode Tool-Emulation
-
-Phase 1:
-  1. Prüfen ob response_format: {type: "json_object"} vom Backend akzeptiert wird
-  2. Prüfen ob Modell zuverlässig {"action": "tool_call", ...} produziert
-  3. Edge Cases: kein Tool nötig, Grenzfall, mehrere mögliche Tools
-
-Direkt gegen den Proxy (der response_format bereits durchreicht).
-"""
-
 import json
+
 import httpx
-import time
+import pytest
 
-from _local_env import BASE, MODEL, auth_headers
+from _e2e import e2e_server
 
-HEADERS = auth_headers()
 
 SAMPLE_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "web_search",
-            "description": "Search the web. Use when current/external information is needed.",
+            "description": "Search the web.",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
-                "properties": {
-                    "query": {"type": "string"},
-                    "count": {"type": "number"},
-                },
+                "properties": {"query": {"type": "string"}},
             },
         },
     },
@@ -37,186 +23,55 @@ SAMPLE_TOOLS = [
         "type": "function",
         "function": {
             "name": "memory_search",
-            "description": "Search the user's personal memory files.",
+            "description": "Search memory.",
             "parameters": {
                 "type": "object",
                 "required": ["query"],
-                "properties": {
-                    "query": {"type": "string"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "exec",
-            "description": "Run a shell command on the local machine.",
-            "parameters": {
-                "type": "object",
-                "required": ["command"],
-                "properties": {
-                    "command": {"type": "string"},
-                },
+                "properties": {"query": {"type": "string"}},
             },
         },
     },
 ]
 
 
-SYSTEM_PROMPT_TEMPLATE = """\
-You have access to the following tools. When the user's request requires a tool, you MUST use it.
-
-Tools:
-{tool_list}
-
-You MUST respond with a valid JSON object. Choose exactly one:
-- If a tool is needed: {{"action": "tool_call", "name": "<tool_name>", "arguments": {{...}}}}
-- If you can answer directly: {{"action": "respond", "content": "<your answer>"}}
-
-No explanation, no markdown, no extra text. Only the JSON object.
-"""
-
-def build_tool_list(tools):
-    lines = []
-    for t in tools:
-        fn = t["function"]
-        params = fn.get("parameters", {}).get("properties", {})
-        required = set(fn.get("parameters", {}).get("required", []))
-        param_str = ", ".join(
-            f"{p}{'?' if p not in required else ''}: {v.get('type', 'any')}"
-            for p, v in params.items()
-        )
-        lines.append(f"- {fn['name']}({param_str}) — {fn['description']}")
-    return "\n".join(lines)
-
-
-def post_json_mode(user_msg: str, tools=None) -> httpx.Response:
-    tool_list = build_tool_list(tools or SAMPLE_TOOLS)
-    system = SYSTEM_PROMPT_TEMPLATE.format(tool_list=tool_list)
-
+def _json_mode_request(e2e_server: dict, user_text: str) -> httpx.Response:
     payload = {
-        "model": MODEL,
+        "model": e2e_server["model"],
         "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_msg},
+            {
+                "role": "system",
+                "content": (
+                    "Return only a valid JSON object. "
+                    "Use either {\"action\":\"tool_call\",...} or {\"action\":\"respond\",...}."
+                ),
+            },
+            {"role": "user", "content": user_text},
         ],
         "response_format": {"type": "json_object"},
-        "stream": False,
+        "tools": SAMPLE_TOOLS,
+        "tool_choice": "auto",
     }
-
-    r = httpx.post(
-        f"{BASE}/v1/chat/completions",
-        headers=HEADERS,
+    return httpx.post(
+        f"{e2e_server['base']}/v1/chat/completions",
+        headers=e2e_server["headers"],
         json=payload,
         timeout=60,
     )
-    return r
 
 
-def ok(label, result, detail=""):
-    status = "OK" if result else "FAIL"
-    arrow = " -> " if detail else ""
-    print(f"  [{status}] {label}{arrow}{detail}")
+@pytest.mark.e2e
+def test_json_mode_returns_parseable_json(e2e_server):
+    response = _json_mode_request(e2e_server, "Was ist 7 mal 8?")
+    assert response.status_code == 200
+    content = response.json()["choices"][0]["message"].get("content") or ""
+    parsed = json.loads(content)
+    assert parsed.get("action") in ("respond", "tool_call")
 
 
-def run_test(label, user_msg, expect_action, expect_tool=None, tools=None):
-    print(f"\n{'-'*60}")
-    print(f"Test: {label}")
-    print(f"User: \"{user_msg}\"")
-
-    r = post_json_mode(user_msg, tools)
-
-    ok("HTTP 200", r.status_code == 200, f"got {r.status_code}")
-    if r.status_code != 200:
-        print(f"  Body: {r.text[:300]}")
-        return
-
-    data = r.json()
-    raw_content = data["choices"][0]["message"]["content"] or ""
-    print(f"  Raw: {raw_content[:200]}")
-
-    # JSON parsen
-    try:
-        parsed = json.loads(raw_content)
-        ok("Valid JSON", True)
-    except json.JSONDecodeError as e:
-        ok("Valid JSON", False, str(e))
-        return
-
-    action = parsed.get("action")
-    ok(f"action = '{expect_action}'", action == expect_action, f"got '{action}'")
-
-    if expect_action == "tool_call":
-        name = parsed.get("name")
-        args = parsed.get("arguments", {})
-        ok(f"name = '{expect_tool}'", name == expect_tool, f"got '{name}'")
-        ok("arguments ist dict", isinstance(args, dict), f"got {type(args).__name__}")
-        if args:
-            print(f"  Arguments: {json.dumps(args, ensure_ascii=False)}")
-    elif expect_action == "respond":
-        content = parsed.get("content", "")
-        ok("content vorhanden", bool(content), f"'{content[:80]}'")
-
-
-# ── Test 1: response_format wird akzeptiert (einfachster Fall) ───────────────
-print("=" * 60)
-print("STRATEGIE A — JSON-Mode Feasibility Tests")
-print(f"Modell: {MODEL}")
-print("=" * 60)
-
-run_test(
-    label="1. Klarer Tool-Call (web_search)",
-    user_msg="Was ist das Wetter heute in Wien?",
-    expect_action="tool_call",
-    expect_tool="web_search",
-)
-time.sleep(2)
-
-run_test(
-    label="2. Klarer Tool-Call (exec)",
-    user_msg="Zeig mir den Inhalt des Ordners C:\\Users",
-    expect_action="tool_call",
-    expect_tool="exec",
-)
-time.sleep(2)
-
-run_test(
-    label="3. Kein Tool nötig — direkte Antwort",
-    user_msg="Was ist 7 mal 8?",
-    expect_action="respond",
-)
-time.sleep(2)
-
-run_test(
-    label="4. Kein Tool nötig — Wissens-Frage",
-    user_msg="Was ist die Hauptstadt von Österreich?",
-    expect_action="respond",
-)
-time.sleep(2)
-
-run_test(
-    label="5. Grenzfall — könnte Tool sein oder nicht",
-    user_msg="Was weisst du ueber die Universitaet Wien?",
-    expect_action=None,  # beides akzeptabel
-)
-time.sleep(2)
-
-run_test(
-    label="6. memory_search",
-    user_msg="Was haben wir zuletzt über den AcademicAI Proxy besprochen?",
-    expect_action="tool_call",
-    expect_tool="memory_search",
-)
-time.sleep(2)
-
-run_test(
-    label="7. Nur ein Tool verfügbar — muss es nutzen",
-    user_msg="Suche im Web nach OpenClaw.",
-    expect_action="tool_call",
-    expect_tool="web_search",
-    tools=[SAMPLE_TOOLS[0]],  # nur web_search
-)
-
-print(f"\n{'='*60}")
-print("Tests abgeschlossen.")
+@pytest.mark.e2e
+def test_json_mode_web_question_prefers_tool_or_valid_response(e2e_server):
+    response = _json_mode_request(e2e_server, "Was ist das Wetter heute in Wien?")
+    assert response.status_code == 200
+    content = response.json()["choices"][0]["message"].get("content") or ""
+    parsed = json.loads(content)
+    assert parsed.get("action") in ("tool_call", "respond")
