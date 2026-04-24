@@ -50,6 +50,7 @@ Proxy -> AcademicAI backend:
 - `X-Client-Secret: <ACADEMICAI_CLIENT_SECRET>`
 
 Configure these values in `.env` (never commit real secrets).
+Startup fails fast when `ACADEMICAI_PROXY_API_KEY` is missing, insecure, or too short.
 
 ## Tenant separation (generic repo vs external tenant config)
 
@@ -74,7 +75,18 @@ Run:
 py server.py
 # or
 .\start_server.ps1
+# optional controlled stop
+.\stop_server.ps1
 ```
+
+## Runtime hardening defaults
+
+- `ACADEMICAI_PROXY_API_KEY` is mandatory and must be changed from insecure placeholders.
+- API key values shorter than 16 chars are rejected at startup.
+- Debug dumps are secret-redacted (`Authorization`, tokens, client secrets).
+- `POST /v1/chat/completions` enforces request shape and size limits.
+- Per-minute rate limiting is enabled by default (`ACADEMICAI_RATE_LIMIT_PER_MINUTE=120`).
+- `GET /health` includes backend status and reports `degraded` if backend check fails.
 
 ## Recommended workflow: let an AI agent install it from this GitHub URL
 
@@ -123,6 +135,12 @@ Forwarded when set:
 Tool emulation input (not forwarded natively):
 - `tools` (alias: `functions`)
 - `tool_choice`
+
+Validation and protection behavior:
+- Invalid JSON body: `400`
+- Invalid request shape (e.g. wrong `messages` type): `422`
+- Oversized payload/tool schema/message content: `413`
+- Rate limit exceeded: `429`
 
 ## Default behavior tuning (env)
 
@@ -256,6 +274,7 @@ Run smoke + functional tests:
 py -m pytest -q
 py tests/test_tool_emulation.py
 py -m pytest -q tests/test_post_tool_guard.py
+py -m pytest -q tests/test_hardening_security_runtime.py
 ```
 
 Optional:

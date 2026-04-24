@@ -13,6 +13,7 @@ import httpx
 
 from .auth import get_base_url, get_headers
 from .errors import map_error
+from .security import redact_sensitive
 from .transformation import build_request_body, build_models_response
 
 log = logging.getLogger("academicai-proxy")
@@ -83,12 +84,20 @@ class AcademicAIProvider:
             f"body_keys={list(request_body.keys())}"
         )
 
-        # Debug-Dump für Entwicklung (optional)
+        # Debug-Dump für Entwicklung (optional, mit Secret-Redaction)
         if DEBUG_DUMPS:
             debug_path = os.path.join(os.path.dirname(__file__), "..", "last_backend_request.json")
             try:
                 with open(debug_path, "w", encoding="utf-8") as f:
-                    json.dump(request_body, f, ensure_ascii=False, indent=2)
+                    json.dump(
+                        {
+                            "headers": redact_sensitive(auth_headers),
+                            "request_body": redact_sensitive(request_body),
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
             except Exception:
                 pass
 
@@ -131,7 +140,7 @@ class AcademicAIProvider:
                 err_body = raw.json()
             except Exception:
                 err_body = {"message": raw.text}
-            log.error(f"backend error {raw.status_code}: {err_body}")
+            log.error(f"backend error {raw.status_code}: {redact_sensitive(err_body)}")
             raise map_error(raw.status_code, err_body)
 
         data = raw.json().get("data", {})

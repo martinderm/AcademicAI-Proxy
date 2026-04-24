@@ -41,6 +41,7 @@ import uvicorn
 
 import academicai
 from academicai.auth import get_base_url, get_headers
+from academicai.security import redact_sensitive
 from academicai.tool_emulation import (
     inject_tools_into_messages,
     parse_tool_calls,
@@ -370,8 +371,28 @@ def _is_human_readable_target(messages: list) -> bool:
 
 # --- Config ---
 PORT = int(os.environ.get("ACADEMICAI_PROXY_PORT", 11435))
-API_KEY = os.environ.get("ACADEMICAI_PROXY_API_KEY", "academicai-proxy")
+API_KEY = (os.environ.get("ACADEMICAI_PROXY_API_KEY") or "").strip()
 DEBUG_DUMPS = os.environ.get("ACADEMICAI_DEBUG_DUMPS", "false").lower() in ("1", "true", "yes", "on")
+
+_INSECURE_PROXY_KEYS = {
+    "academicai-proxy",
+    "changeme",
+    "replace-with-strong-key",
+}
+
+
+def _validate_proxy_api_key(api_key: str) -> str:
+    key = (api_key or "").strip()
+    if not key:
+        raise RuntimeError("ACADEMICAI_PROXY_API_KEY is required and must not be empty.")
+    if key.lower() in _INSECURE_PROXY_KEYS:
+        raise RuntimeError("ACADEMICAI_PROXY_API_KEY uses an insecure placeholder value.")
+    if len(key) < 16:
+        raise RuntimeError("ACADEMICAI_PROXY_API_KEY is too short; use at least 16 characters.")
+    return key
+
+
+API_KEY = _validate_proxy_api_key(API_KEY)
 
 # Proxy-Defaults (nur wenn Client keinen Wert setzt)
 DEFAULT_CHAT_TEMPERATURE = float(os.environ.get("ACADEMICAI_DEFAULT_CHAT_TEMPERATURE", "0.6"))
@@ -409,9 +430,22 @@ COST_CACHE_FILE = os.environ.get(
 )
 COST_CACHE_TTL_SECONDS = max(60, int(os.environ.get("ACADEMICAI_COST_CACHE_TTL_SECONDS", "600")))
 COST_REFRESH_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS", "8")))
+HEALTH_CHECK_BACKEND = os.environ.get("ACADEMICAI_HEALTH_CHECK_BACKEND", "true").lower() in ("1", "true", "yes", "on")
+HEALTH_CHECK_TIMEOUT_SECONDS = max(0.2, float(os.environ.get("ACADEMICAI_HEALTH_CHECK_TIMEOUT_SECONDS", "2")))
+PID_FILE = Path(os.environ.get("ACADEMICAI_PID_FILE", str(Path(__file__).resolve().parent / "server.pid")))
 
 _cost_lock = threading.Lock()
 _cost_refresh_in_flight = False
+
+MAX_MESSAGES = max(1, int(os.environ.get("ACADEMICAI_MAX_MESSAGES", "120")))
+MAX_TOOLS = max(0, int(os.environ.get("ACADEMICAI_MAX_TOOLS", "64")))
+MAX_MESSAGE_TEXT_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_MESSAGE_TEXT_CHARS", "20000")))
+MAX_TOOL_SCHEMA_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_TOOL_SCHEMA_CHARS", "25000")))
+MAX_REQUEST_JSON_CHARS = max(1024, int(os.environ.get("ACADEMICAI_MAX_REQUEST_JSON_CHARS", "300000")))
+
+RATE_LIMIT_PER_MINUTE = max(0, int(os.environ.get("ACADEMICAI_RATE_LIMIT_PER_MINUTE", "120")))
+_rate_limit_lock = threading.Lock()
+_rate_limit_buckets: dict[str, list[float]] = {}
 
 
 def _now_utc_iso() -> str:
@@ -590,6 +624,77 @@ def _build_humanization_messages(original_user_query: str, structured_content: s
     return [system_msg, user_msg]
 
 
+def _validate_chat_request_body(body: dict) -> None:
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="request body must be a JSON object")
+
+    model = body.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(status_code=422, detail="model must be a non-empty string")
+    if len(model.strip()) > 200:
+        raise HTTPException(status_code=422, detail="model is too long")
+
+    messages = body.get("messages")
+    if not isinstance(messages, list) or not messages:
+        raise HTTPException(status_code=422, detail="messages must be a non-empty list")
+    if len(messages) > MAX_MESSAGES:
+        raise HTTPException(status_code=413, detail=f"messages exceed limit ({MAX_MESSAGES})")
+
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            raise HTTPException(status_code=422, detail=f"messages[{idx}] must be an object")
+        role = msg.get("role")
+        if not isinstance(role, str) or not role.strip():
+            raise HTTPException(status_code=422, detail=f"messages[{idx}].role must be a non-empty string")
+
+        content_text = _extract_text_content(msg.get("content"))
+        if len(content_text) > MAX_MESSAGE_TEXT_CHARS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"messages[{idx}].content exceeds limit ({MAX_MESSAGE_TEXT_CHARS} chars)",
+            )
+
+    tools = body.get("tools") or body.get("functions") or []
+    if tools and not isinstance(tools, list):
+        raise HTTPException(status_code=422, detail="tools/functions must be a list")
+    if isinstance(tools, list) and len(tools) > MAX_TOOLS:
+        raise HTTPException(status_code=413, detail=f"tools exceed limit ({MAX_TOOLS})")
+
+    for idx, tool in enumerate(tools or []):
+        if not isinstance(tool, dict):
+            raise HTTPException(status_code=422, detail=f"tools[{idx}] must be an object")
+        try:
+            schema_size = len(json.dumps(tool, ensure_ascii=False))
+        except Exception:
+            raise HTTPException(status_code=422, detail=f"tools[{idx}] is not JSON-serializable")
+        if schema_size > MAX_TOOL_SCHEMA_CHARS:
+            raise HTTPException(
+                status_code=413,
+                detail=f"tools[{idx}] exceeds limit ({MAX_TOOL_SCHEMA_CHARS} chars)",
+            )
+
+
+def _rate_limit_bucket(request: Request, key: str) -> str:
+    client_host = request.client.host if request.client else "unknown"
+    return f"{client_host}:{key[:8]}"
+
+
+def _enforce_chat_rate_limit(request: Request, key: str) -> None:
+    if RATE_LIMIT_PER_MINUTE <= 0:
+        return
+
+    bucket = _rate_limit_bucket(request, key)
+    now = time.time()
+    window_start = now - 60.0
+
+    with _rate_limit_lock:
+        hits = [ts for ts in _rate_limit_buckets.get(bucket, []) if ts >= window_start]
+        if len(hits) >= RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(status_code=429, detail="rate limit exceeded")
+        hits.append(now)
+        _rate_limit_buckets[bucket] = hits
+
+
 async def _run_humanization_pass(model: str, original_user_query: str, structured_content: str) -> Optional[str]:
     """Führt optionalen zweiten LLM-Pass aus und liefert finalen Text zurück."""
     try:
@@ -605,6 +710,56 @@ async def _run_humanization_pass(model: str, original_user_query: str, structure
     except Exception as e:
         log.warning(f"humanization pass failed, fallback to first-pass content: {e}")
         return None
+
+
+def _write_pid_file() -> None:
+    try:
+        PID_FILE.write_text(f"{os.getpid()}\n", encoding="utf-8")
+    except Exception as e:
+        log.warning(f"could not write pid file {PID_FILE}: {e}")
+
+
+def _cleanup_pid_file() -> None:
+    try:
+        if not PID_FILE.exists():
+            return
+        raw = PID_FILE.read_text(encoding="utf-8").strip()
+        if raw and raw != str(os.getpid()):
+            return
+        PID_FILE.unlink(missing_ok=True)
+    except Exception as e:
+        log.warning(f"could not cleanup pid file {PID_FILE}: {e}")
+
+
+def _check_backend_health() -> dict:
+    if not HEALTH_CHECK_BACKEND:
+        return {"enabled": False, "ok": None}
+
+    started = time.perf_counter()
+    try:
+        endpoint = f"{get_base_url().rstrip('/')}/api/v1/llm/models"
+        headers = dict(get_headers() or {})
+        with httpx.Client(timeout=HEALTH_CHECK_TIMEOUT_SECONDS) as client:
+            resp = client.get(endpoint, headers=headers)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        ok = resp.status_code == 200
+        out = {
+            "enabled": True,
+            "ok": ok,
+            "status_code": resp.status_code,
+            "latency_ms": latency_ms,
+        }
+        if not ok:
+            out["error"] = "backend responded with non-200 status"
+        return out
+    except Exception as e:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        return {
+            "enabled": True,
+            "ok": False,
+            "latency_ms": latency_ms,
+            "error": str(e),
+        }
 
 # --- Setup ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -627,9 +782,23 @@ def verify_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 # --- Health ---
 
+
+@app.on_event("startup")
+def _on_startup() -> None:
+    _write_pid_file()
+
+
+@app.on_event("shutdown")
+def _on_shutdown() -> None:
+    _cleanup_pid_file()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "academicai-proxy"}
+    backend = _check_backend_health()
+    status = "ok"
+    if backend.get("enabled") and backend.get("ok") is False:
+        status = "degraded"
+    return {"status": status, "service": "academicai-proxy", "backend": backend}
 
 
 @app.get("/internal/cost-status")
@@ -661,7 +830,21 @@ async def list_models(key: str = Depends(verify_key)):
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request, key: str = Depends(verify_key)):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    try:
+        request_size = len(json.dumps(body, ensure_ascii=False))
+    except Exception:
+        raise HTTPException(status_code=422, detail="request body is not JSON-serializable")
+
+    if request_size > MAX_REQUEST_JSON_CHARS:
+        raise HTTPException(status_code=413, detail=f"request body exceeds limit ({MAX_REQUEST_JSON_CHARS} chars)")
+
+    _validate_chat_request_body(body)
+    _enforce_chat_rate_limit(request, key)
 
     # Vollständiges Request-Dump für Debugging (optional via Env)
     if DEBUG_DUMPS:
@@ -669,7 +852,7 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
         _dump_path = os.path.join(os.path.dirname(__file__), "last_request.json")
         try:
             with open(_dump_path, "w", encoding="utf-8") as _f:
-                _json.dump(body, _f, ensure_ascii=False, indent=2)
+                _json.dump(redact_sensitive(body), _f, ensure_ascii=False, indent=2)
         except Exception:
             pass
 
@@ -700,9 +883,6 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     # Tool-Definitionen in System-Prompt injizieren
     if tools:
         messages = inject_tools_into_messages(messages, tools)
-
-    if not model or not messages:
-        raise HTTPException(status_code=422, detail="model und messages sind Pflichtfelder")
 
     want_stream = bool(body.get("stream"))
     human_target_hint = _is_human_readable_target(messages)
