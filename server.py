@@ -545,7 +545,7 @@ def _fetch_cost_snapshot() -> dict:
         return {}
 
     base_url = get_base_url().rstrip("/")
-    cost_url = f"{base_url}/api/v1/cost"
+    cost_url = f"{base_url}/api/v1/cost/"
     headers = dict(get_headers() or {})
     headers.setdefault("Accept", "application/json")
 

@@ -18,13 +18,13 @@ if (Test-Path $pidFile) {
     Remove-Item $pidFile -ErrorAction SilentlyContinue
 }
 
-if (-not $stopped) {
-    $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($conn) {
-        Stop-Process -Id $conn.OwningProcess -Force -ErrorAction SilentlyContinue
-        Write-Host "AcademicAI Proxy Prozess ueber Port $port gestoppt (PID: $($conn.OwningProcess))"
-        $stopped = $true
-    }
+# Always verify if the port is still listening, in case of orphaned child processes
+$conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($conn) {
+    $owningPid = $conn.OwningProcess
+    Stop-Process -Id $owningPid -Force -ErrorAction SilentlyContinue
+    Write-Host "Orphaned AcademicAI Proxy Prozess ueber Port $port gestoppt (PID: $owningPid)"
+    $stopped = $true
 }
 
 if (-not $stopped) {

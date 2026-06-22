@@ -32,13 +32,31 @@ if (-not (Test-Path $pythonExe)) {
 }
 
 Write-Host "Starte AcademicAI Proxy auf Port $port..."
-$proc = Start-Process -FilePath $pythonExe `
-    -ArgumentList $serverScript `
-    -WorkingDirectory $PSScriptRoot `
-    -RedirectStandardOutput $logFile `
-    -RedirectStandardError $errFile `
-    -PassThru `
-    -WindowStyle Hidden
+$envPrefix = ""
+Get-ChildItem env: | Where-Object { $_.Name -like 'ACADEMICAI_*' -or $_.Name -eq 'TENANT_ID' } | ForEach-Object {
+    $val = $_.Value -replace "'", "''"
+    $envPrefix += "`$env:$($_.Name) = '$val'; "
+}
+$cmd = "powershell.exe -NoProfile -Command `"$envPrefix & '$pythonExe' -u '$serverScript' > '$logFile' 2> '$errFile'`""
+$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $PSScriptRoot }
 
-$proc.Id | Out-File $pidFile -Encoding UTF8
-Write-Host "AcademicAI Proxy gestartet (PID: $($proc.Id))"
+if ($result.ReturnValue -eq 0) {
+    # Wait up to 5 seconds for the server to start listening and bind to the port
+    $realPid = $null
+    for ($i = 0; $i -lt 10; $i++) {
+        Start-Sleep -Milliseconds 500
+        $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($conn) {
+            $realPid = $conn.OwningProcess
+            break
+        }
+    }
+    if (-not $realPid) {
+        $realPid = $result.ProcessId
+    }
+    $realPid | Out-File $pidFile -Encoding UTF8
+    Write-Host "AcademicAI Proxy gestartet (PID: $realPid)"
+} else {
+    Write-Error "Fehler beim Starten des AcademicAI Proxy (WMI ReturnValue: $($result.ReturnValue))"
+    exit 1
+}

@@ -51,7 +51,10 @@ function Import-BackendCredsFromEnvFile {
     }
 }
 
-$python = "c:/Users/dagobert-ai/.openclaw/.venv/Scripts/python.exe"
+$python = "$PSScriptRoot\.venv\Scripts\python.exe"
+if (-not (Test-Path $python)) {
+    $python = "c:/Users/dagobert-ai/.openclaw/.venv/Scripts/python.exe"
+}
 if (-not (Test-Path $python)) {
     $python = "py"
 }
