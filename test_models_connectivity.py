@@ -26,6 +26,7 @@ def test_model(model_name: str, stream: bool) -> tuple[bool, str]:
     payload = {
         "model": model_name,
         "messages": [{"role": "user", "content": "ping"}],
+        "max_tokens": 10,
         "stream": stream
     }
     try:

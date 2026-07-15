@@ -148,11 +148,15 @@ def build_request_body(model: str, messages: list, optional_params: dict) -> dic
     }
 
     is_openai_model = model.startswith("gpt-") or model.startswith("o1-") or model.startswith("o3-") or model.startswith("o4-")
+    has_token_limit_bug = model.startswith("gpt-5") or model.startswith("sonar-")
 
     for openai_key, academicai_key in scalar_mapping.items():
         if openai_key in optional_params and optional_params[openai_key] is not None:
             # Strip parameters not supported by non-OpenAI models
             if not is_openai_model and openai_key in ("frequency_penalty", "presence_penalty"):
+                continue
+            # Strip token limit parameters for models that fail when they are present
+            if has_token_limit_bug and openai_key in ("max_tokens", "max_completion_tokens"):
                 continue
             body[academicai_key] = optional_params[openai_key]
 
