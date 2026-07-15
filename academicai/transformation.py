@@ -147,8 +147,13 @@ def build_request_body(model: str, messages: list, optional_params: dict) -> dic
         "verbosity": "verbosity",
     }
 
+    is_openai_model = model.startswith("gpt-") or model.startswith("o1-") or model.startswith("o3-") or model.startswith("o4-")
+
     for openai_key, academicai_key in scalar_mapping.items():
         if openai_key in optional_params and optional_params[openai_key] is not None:
+            # Strip parameters not supported by non-OpenAI models
+            if not is_openai_model and openai_key in ("frequency_penalty", "presence_penalty"):
+                continue
             body[academicai_key] = optional_params[openai_key]
 
     # response_format → responseFormat
