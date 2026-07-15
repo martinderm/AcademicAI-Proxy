@@ -27,6 +27,7 @@ def test_model(model_name: str, stream: bool) -> tuple[bool, str]:
         "model": model_name,
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 10,
+        "response_format": {"type": "text"},
         "stream": stream
     }
     try:

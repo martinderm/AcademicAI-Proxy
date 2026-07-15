@@ -160,9 +160,10 @@ def build_request_body(model: str, messages: list, optional_params: dict) -> dic
                 continue
             body[academicai_key] = optional_params[openai_key]
 
-    # response_format → responseFormat
+    # response_format → responseFormat (AcademicAI backend validation only allows this field for OpenAI models)
     if "response_format" in optional_params and optional_params["response_format"] is not None:
-        body["responseFormat"] = optional_params["response_format"]
+        if is_openai_model:
+            body["responseFormat"] = optional_params["response_format"]
 
     # tailoredAiId: kann via extra_body übergeben werden
     extra_body = optional_params.get("extra_body") or {}
