@@ -171,11 +171,10 @@ def build_request_body(model: str, messages: list, optional_params: dict) -> dic
         body["tailoredAiId"] = extra_body["tailoredAiId"]
 
     # For reasoning models (like claude-opus-4-6, gpt-5.2, gpt-5.5), temperature is only allowed if reasoningEffort is "none".
-    # Standard clients (like Copilot) send temperature without specifying reasoning_effort.
+    # Standard clients (like Copilot) send temperature, so we always override reasoningEffort to "none" if temperature is present.
     reasoning_models = ("claude-opus-4-6", "gpt-5.2", "gpt-5.5")
     if model in reasoning_models and "temperature" in optional_params and optional_params["temperature"] is not None:
-        if "reasoning_effort" not in optional_params or optional_params["reasoning_effort"] is None:
-            body["reasoningEffort"] = "none"
+        body["reasoningEffort"] = "none"
 
     return body
 
