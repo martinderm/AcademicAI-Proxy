@@ -26,3 +26,4 @@ Thumbs.db
 /data/*.json
 /data/**/*.json
 skill_snippets.json
+.env.localtest
