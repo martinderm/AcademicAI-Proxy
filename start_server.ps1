@@ -6,8 +6,7 @@ if ($env:ACADEMICAI_PROXY_PORT) {
     $port = [int]$env:ACADEMICAI_PROXY_PORT
 }
 $pidFile = "$PSScriptRoot\server.pid"
-$logFile = "$PSScriptRoot\server.log"
-$errFile = "$PSScriptRoot\server.err.log"
+$consoleLog = "$PSScriptRoot\console.log"
 $serverScript = "$PSScriptRoot\server.py"
 
 if (Test-Path $pidFile) {
@@ -40,7 +39,7 @@ Get-ChildItem env: | Where-Object { $_.Name -like 'ACADEMICAI_*' -or $_.Name -eq
     $val = $_.Value -replace "'", "''"
     $envPrefix += "`$env:$($_.Name) = '$val'; "
 }
-$cmd = "powershell.exe -NoProfile -Command `"$envPrefix & '$pythonExe' -u '$serverScript' > '$logFile' 2> '$errFile'`""
+$cmd = "powershell.exe -NoProfile -Command `"$envPrefix & '$pythonExe' -u '$serverScript' > '$consoleLog' 2>&1`""
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $PSScriptRoot }
 
 if ($result.ReturnValue -eq 0) {

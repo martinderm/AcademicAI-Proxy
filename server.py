@@ -762,7 +762,43 @@ def _check_backend_health() -> dict:
         }
 
 # --- Setup ---
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+from logging.handlers import TimedRotatingFileHandler
+
+log_formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+
+# TimedRotatingFileHandler for general logs (INFO and above), rotated daily, 30 days retention
+log_file_path = os.environ.get("ACADEMICAI_PROXY_LOG_FILE", "server.log")
+info_handler = TimedRotatingFileHandler(log_file_path, when="D", interval=1, backupCount=30, encoding="utf-8")
+info_handler.setLevel(logging.INFO)
+info_handler.setFormatter(log_formatter)
+
+# TimedRotatingFileHandler for error logs (ERROR and above), rotated daily, 30 days retention
+err_file_path = os.environ.get("ACADEMICAI_PROXY_ERR_FILE", "server.err.log")
+error_handler = TimedRotatingFileHandler(err_file_path, when="D", interval=1, backupCount=30, encoding="utf-8")
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(log_formatter)
+
+# Console logger for debug runs
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(log_formatter)
+
+# Root logger setup
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(info_handler)
+root_logger.addHandler(error_handler)
+root_logger.addHandler(console_handler)
+
+# Configure uvicorn loggers to use rotating handlers
+for uvicorn_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+    ulog = logging.getLogger(uvicorn_logger_name)
+    ulog.handlers = []
+    ulog.addHandler(info_handler)
+    ulog.addHandler(error_handler)
+    ulog.addHandler(console_handler)
+    ulog.propagate = False
+
 log = logging.getLogger("academicai-proxy")
 
 app = FastAPI(
