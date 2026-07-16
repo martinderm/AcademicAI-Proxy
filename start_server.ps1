@@ -2,6 +2,9 @@
 # Startet den Server robust und bereinigt stale PID-Dateien.
 
 $port = 11435
+if ($env:ACADEMICAI_PROXY_PORT) {
+    $port = [int]$env:ACADEMICAI_PROXY_PORT
+}
 $pidFile = "$PSScriptRoot\server.pid"
 $logFile = "$PSScriptRoot\server.log"
 $errFile = "$PSScriptRoot\server.err.log"

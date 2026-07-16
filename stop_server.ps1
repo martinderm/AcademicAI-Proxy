@@ -2,6 +2,9 @@
 # Stoppt den Server kontrolliert und bereinigt die PID-Datei.
 
 $port = 11435
+if ($env:ACADEMICAI_PROXY_PORT) {
+    $port = [int]$env:ACADEMICAI_PROXY_PORT
+}
 $pidFile = "$PSScriptRoot\server.pid"
 
 $stopped = $false
