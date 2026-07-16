@@ -28,6 +28,7 @@ def test_model(model_name: str, stream: bool) -> tuple[bool, str]:
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 10,
         "response_format": {"type": "text"},
+        "temperature": 0.7,
         "stream": stream
     }
     try:
