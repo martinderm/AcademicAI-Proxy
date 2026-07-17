@@ -223,7 +223,7 @@ before tool-emulation. This increases the chance of correct tool use for domain 
 
 Env flags:
 
-- `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false` (default: `true`, but recommended `false` for Copilot)
+- `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false` (default: `false`, recommended `false` for Copilot)
 - `ACADEMICAI_SKILL_SNIPPETS_FILE=./data/skill_snippets.json`
 - `ACADEMICAI_SKILL_SNIPPETS_MAX=1`
 
