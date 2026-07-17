@@ -1,0 +1,73 @@
+name: Create Release v0.6
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    # Only run once — skip if the tag already exists
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          if git rev-parse "v0.6" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create tag and release
+        if: steps.tag_check.outputs.exists == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create v0.6 \
+            --title "v0.6 – Security Hardening, Model Compatibility & Operations" \
+            --notes "## What's new in v0.6
+
+### 🔒 Security & Hardening
+- Mandatory API key validation: length checks and placeholder detection prevent misconfigured keys from reaching the backend.
+- Request size and schema validation for \`/v1/chat/completions\` — malformed payloads are rejected early.
+- Rate limiting added for chat requests to protect the backend under load.
+- New \`/health\` endpoint reports backend reachability and basic proxy status.
+- Debug dumps now redact sensitive fields (API keys, tokens) before logging.
+- Added dedicated security hardening test suite (\`tests/test_hardening_security_runtime.py\`).
+
+### ⚙️ Non-OpenAI Model Compatibility
+- \`response_format\` is now stripped for non-OpenAI models to bypass a backend validation bug.
+- \`max_tokens\` / \`max_completion_tokens\` are auto-stripped for gpt-5 and Perplexity models to prevent upstream 500 errors.
+- \`frequency_penalty\` and \`presence_penalty\` are filtered out for non-OpenAI models.
+- \`reasoningEffort\` is forced to \`none\` for all reasoning models whenever \`temperature\` is present, satisfying backend validation for gpt-5.2, gpt-5.5, and their variants.
+
+### 🛠️ Operations & Infrastructure
+- **Log rotation**: Daily \`TimedRotatingFileHandler\` with 30-day retention — logs no longer grow unbounded.
+- **Dynamic port configuration**: \`ACADEMICAI_PROXY_PORT\` env var is now respected by \`start_server.ps1\` and \`stop_server.ps1\`, removing the hardcoded default.
+- **Isolated test port**: Local test environment uses port 11436 (\`env.localtest\`) to prevent conflicts with a running production server.
+- \`env.localtest\` moved to \`.gitignore\` — local test credentials stay out of version control.
+
+### 🧪 Testing
+- Full test suite refactored to \`httpx\` + \`pytest\` for cleaner async integration tests.
+- Local test environment now imports backend credentials from \`.env\` automatically.
+- New \`test_models_connectivity.py\` script verifies connectivity to all configured AcademicAI models on demand.
+- Background test server PID tracking fixed; tests prefer the local venv Python.
+
+### 📬 Skill Snippets
+- Added \`mail-processor\` shadow snippet for Copilot-driven mail workflows.
+- Skill snippet file brought back into sync with latest snippet schema.
+
+### 📝 Documentation
+- README expanded with BOKU Cost API constraints, isolated port guidance, log rotation notes, and Copilot-centric Skill Snippet advice.
+- Corrected default value of \`ACADEMICAI_ENABLE_SKILL_SNIPPETS\` (was incorrectly documented as \`true\`, default is \`false\`).
+
+---
+Full changelog: https://github.com/martinderm/AcademicAI-Proxy/blob/main/CHANGELOG.md" \
+            --latest
