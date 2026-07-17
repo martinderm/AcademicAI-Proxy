@@ -10,12 +10,14 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 - Health endpoint: ✅
 - Tool-call emulation (JSON-mode): ✅
 - SSE-style streaming emulation: ✅
+- Daily Log Rotation (30 days retention): ✅
+- E2E Test Port Isolation (runs on port 11436): ✅
+- Automatic Prompt Caching Compatibility: ✅
 
-### Planned / open features
+### Caching and Costs Status
 
-- Skill snippets on vector basis: 🔴
-- TailoredAI RAG interface (per API docs, short re-check): 🔴
-- Cost/usage monitoring via API cost endpoint: 🔴
+- **Automatic Prefix Caching**: ✅ Supported natively. The proxy is aligned to merge system instructions at the very beginning of the first user message, maximizing Azure OpenAI prefix cache hit rates.
+- **Cost/usage monitoring**: 🔴 (Disabled / Forbidden on the BOKU backend credentials - endpoint returns `403 Forbidden` due to tenant permissions).
 
 ## Why this proxy exists
 
@@ -213,9 +215,15 @@ You can enable retrieval-based skill snippets that are injected as short system 
 before tool-emulation. This increases the chance of correct tool use for domain intents
 (e.g. mailbox/email -> Himalaya wrapper commands).
 
+> [!IMPORTANT]
+> **Recommendation for modern harnesses (e.g. GitHub Copilot)**:
+> It is highly recommended to **disable** both skill snippets and self-learning for developer-centric setups.
+> Modern clients like GitHub Copilot manage workspace guidelines natively (e.g., via `.github/copilot-instructions.md` inside your workspace) and provide detailed, context-aware tool schemas automatically. 
+> Enabling proxy-side snippet injection or auto-learning in a Copilot environment is redundant, adds unnecessary maintenance overhead, and pollutes the system prompt with generic keyword noise.
+
 Env flags:
 
-- `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false`
+- `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false` (default: `true`, but recommended `false` for Copilot)
 - `ACADEMICAI_SKILL_SNIPPETS_FILE=./data/skill_snippets.json`
 - `ACADEMICAI_SKILL_SNIPPETS_MAX=1`
 
@@ -238,9 +246,12 @@ This is intentionally simple (no vector DB / no embeddings):
 - upsert `auto:<tool_name>` snippets
 - increase hit counters and extend topics over time
 
+> [!WARNING]
+> Keep `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=false` (default). Naive keyword extraction can easily associate common words (like "please", "run") with unrelated tools, diluting the LLM's system context on future turns.
+
 Env flags:
 
-- `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=true|false`
+- `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=true|false` (default: `false`)
 - `ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL=6`
 - `ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN=4`
 
