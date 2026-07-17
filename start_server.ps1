@@ -40,7 +40,11 @@ Get-ChildItem env: | Where-Object { $_.Name -like 'ACADEMICAI_*' -or $_.Name -eq
     $envPrefix += "`$env:$($_.Name) = '$val'; "
 }
 $cmd = "powershell.exe -NoProfile -Command `"$envPrefix & '$pythonExe' -u '$serverScript' > '$consoleLog' 2>&1`""
-$result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $PSScriptRoot }
+$startup = [wmiclass]"Win32_ProcessStartup"
+$startupInfo = $startup.CreateInstance()
+$startupInfo.ShowWindow = 0
+$process = [wmiclass]"Win32_Process"
+$result = $process.Create($cmd, $PSScriptRoot, $startupInfo)
 
 if ($result.ReturnValue -eq 0) {
     # Wait up to 5 seconds for the server to start listening and bind to the port

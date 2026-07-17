@@ -1109,7 +1109,7 @@ if __name__ == "__main__":
     sys.stdout.write(f"  [API Key]       {'Active' if API_KEY else 'Missing/Insecure'}\n")
     sys.stdout.write(f"  [Log Rotation]  Active (30-day retention)\n")
     sys.stdout.write(f"  [Humanization]  {'Active (temp: ' + str(HUMANIZATION_TEMPERATURE) + ')' if ENABLE_HUMANIZATION_PASS else 'Disabled'}\n")
-    sys.stdout.write(f"  [MiroFish Limits] {MAX_MESSAGES} msg / {MAX_REQUEST_JSON_CHARS} char payload\n")
+    sys.stdout.write(f"  [Request Limits]  {MAX_MESSAGES} msg / {MAX_REQUEST_JSON_CHARS} char payload\n")
     sys.stdout.write(f"  [Test Port]     11436 (isolated)\n")
     sys.stdout.write(" --------------------------------------------------------\n\n")
     sys.stdout.flush()
