@@ -3,12 +3,14 @@ name: Create Release v0.6
 on:
   push:
     branches:
-      - main
+      - master
 
 jobs:
   release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     # Only run once — skip if the tag already exists
     steps:
       - name: Checkout
