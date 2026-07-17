@@ -1095,6 +1095,23 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
 # --- Start ---
 
 if __name__ == "__main__":
-    log.info(f"AcademicAI Proxy startet auf Port {PORT}")
-    log.info("API-Key configured: yes")
+    startup_banner = r"""
+    _                _                 _      _      ___ 
+   /_\  __ __ _  __| |___ _ __  _  _ _| |_ __(_)  _|_  |
+  / _ \/ _/ _` |/ _` / -_) '  \| |/ _` |  _/ _| | | |_  |
+ /_/ \_\__\__,_|\__,_\___|_|_|_|_|\__,_|\__\__|_| | /___|
+ --------------------------------------------------------
+             AcademicAI Proxy Adapter - v1.0.0
+ --------------------------------------------------------
+"""
+    sys.stdout.write(startup_banner)
+    sys.stdout.write(f"  [Host/Port]     127.0.0.1:{PORT}\n")
+    sys.stdout.write(f"  [API Key]       {'Active' if API_KEY else 'Missing/Insecure'}\n")
+    sys.stdout.write(f"  [Log Rotation]  Active (30-day retention)\n")
+    sys.stdout.write(f"  [Humanization]  {'Active (temp: ' + str(HUMANIZATION_TEMPERATURE) + ')' if ENABLE_HUMANIZATION_PASS else 'Disabled'}\n")
+    sys.stdout.write(f"  [MiroFish Limits] {MAX_MESSAGES} msg / {MAX_REQUEST_JSON_CHARS} char payload\n")
+    sys.stdout.write(f"  [Test Port]     11436 (isolated)\n")
+    sys.stdout.write(" --------------------------------------------------------\n\n")
+    sys.stdout.flush()
+
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")
