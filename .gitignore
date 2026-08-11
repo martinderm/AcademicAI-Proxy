@@ -11,8 +11,11 @@ __pycache__/
 
 # Runtime/debug artifacts
 server.pid
-server.log
-server.err.log
+server.log*
+server.err.log*
+console.log*
+*.log
+*.log.*
 last_request.json
 last_backend_request.json
 
@@ -27,4 +30,3 @@ Thumbs.db
 /data/**/*.json
 skill_snippets.json
 .env.localtest
-console.log
