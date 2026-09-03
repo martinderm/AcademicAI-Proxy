@@ -2,7 +2,7 @@
 
 > **Typ**: ICM Form 6 (`system-map`)  
 > **Ziel**: Kompakte, agentenlesbare Architekturkarte des `AcademicAI-Proxy` zur Vermeidung von Context-Bloat und Attention Drift bei Refactorings und Feature-Erweiterungen.  
-> **Gültig für**: `d:\Programs\AcademicAI-Proxy`
+> **Gültig für**: Repository Root (relativ)
 
 ---
 
@@ -48,3 +48,4 @@ Die Architektur ist nach dem dreidimensionalen ICM-Kartenmodell (`objects`, `pro
 2. **Port-Isolation beachten:** Der reguläre Service bindet `11435`. Automatische Tests laufen isoliert auf Port `11436` ([`run_local_tests.ps1`](../../run_local_tests.ps1)).
 3. **Safety-Guard für destruktive Mails:** Batch-Tool-Calls, die Mails löschen oder verschieben (`exec` mit `message delete/move`), werden blockiert, wenn in derselben Batch nicht zuvor ein `write`/`edit` stattfand.
 4. **Azure Prefix Caching:** System-Prompts werden an den Kopf der ersten User-Message gemergt, um den Cache-Hit am BOKU-Azure-Backend zu sichern.
+5. **Relative Pfade:** Generell keine absoluten maschinen- oder benutzerspezifischen Pfade (`C:\...`, `D:\...`) in Code oder Doku verwenden; alle Pfade müssen relativ zum Repository-Root sein (öffentliches GitHub-Repository).
