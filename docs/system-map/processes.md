@@ -70,8 +70,27 @@ Verhindert Endlos-Schleifen oder falsche Erfolgsmeldungen:
 
 ---
 
-## 4. Test- & E2E-Workflow ([`run_local_tests.ps1`](../../run_local_tests.ps1))
+## 4. Resilience & Retry-Schleife ([`academicai/provider.py`](../../academicai/provider.py))
 
-1. Startet einen separaten Test-Server auf **Port 11436** (via `start_test_server.ps1`).
-2. Führt `pytest` gegen den Test-Port aus, um den aktiven Live-Server auf Port 11435 nicht zu stören.
-3. Beendet den Test-Server sauber über dessen PID.
+HTTP-Aufrufe an das BOKU-Backend sind gegen transiente Netzwerkfehler abgesichert:
+- **Retry-Limit:** `ACADEMICAI_RETRY_MAX` (Default: 2 Wiederholungen).
+- **Backoff:** Exponentielles Backoff (`RETRY_BASE_MS * 2^attempt`) bei HTTP 502/503/504 oder `httpx.TransportError`.
+- **Fast-Fail:** HTTP 401/403 bricht sofort ab (kein Retry bei Auth-Fehlern).
+
+---
+
+## 5. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
+
+Die 16 Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab:
+
+| Test-Suite | Testfokus & Schutzbereich |
+| :--- | :--- |
+| `test_tool_emulation.py` | Extraktion von ```json ... ``` Blöcken, Reparatur von unvollständigen JSON-Objekten. |
+| `test_multi_step_tool_emulation.py` | Mehrstufige Handoffs: Tool Call → Result → Next Call → Final Answer. |
+| `test_post_tool_guard.py` | Verhindert Endlosschleifen nach Tool-Fehlern oder phantomhaften Folgeaufrufen. |
+| `test_humanization_flow.py` | Erkennung menschlicher Chat-Kanäle (WhatsApp/Telegram) vs. maschineller JSON-Fallback. |
+| `test_hardening_security_runtime.py` | Schutz gegen Klartext-Leakage, Insecure Key Detection, Mail-Destruction Guard. |
+| `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
+| `test_skill_snippets.py` | Dynamisches Self-Learning und Topic-Matching für Tool-Empfehlungen. |
+| `run_local_tests.ps1` | E2E-Lauf: Startet Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
+
