@@ -48,3 +48,11 @@
    Wenn `ACADEMICAI_PROXY_API_KEY` fehlt, kürzer als 16 Zeichen ist oder bekannte Standardwerte (`changeme`, `replace-with-strong-key`) enthält, verweigert der Server den Start mit Exit-Code 1.
 3. **Mail-Destruction Guard (`_enforce_write_before_mail_delete`):**  
    Verhindert das versehentliche Löschen/Verschieben von E-Mails via Himalaya CLI (`exec`), falls die Batch-Operation nicht vorher explizit einen Schreibvorgang (`write`/`edit`) enthielt.
+4. **Request- & Payload-Limits (413 / 422 Guardrails):**  
+   Schützt Proxy und Backend vor Memory Exhaustion und unkontrollierten Payloads:
+   - Tool-Obergrenze: `ACADEMICAI_MAX_TOOLS` (Default: 256)
+   - Tool-Schema-Größe: `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` (Default: 100.000 Chars)
+   - Message-Textlänge: `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` (Default: 200.000 Chars, in `.env` für 1M-Context-Modelle bis 1.000.000)
+   - Gesamt-JSON-Payload: `ACADEMICAI_MAX_REQUEST_JSON_CHARS` (Default: 2.000.000 Chars, konfigurierbar bis 10.000.000)
+   - Nachrichtenanzahl: `ACADEMICAI_MAX_MESSAGES` (Default: 300)
+   - Bei Überschreitung wird der Request mit `413 Content Too Large` abgewiesen und mit exakten Zählwerten in `server.log` protokolliert.

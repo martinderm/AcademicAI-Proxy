@@ -437,11 +437,11 @@ PID_FILE = Path(os.environ.get("ACADEMICAI_PID_FILE", str(Path(__file__).resolve
 _cost_lock = threading.Lock()
 _cost_refresh_in_flight = False
 
-MAX_MESSAGES = max(1, int(os.environ.get("ACADEMICAI_MAX_MESSAGES", "120")))
-MAX_TOOLS = max(0, int(os.environ.get("ACADEMICAI_MAX_TOOLS", "64")))
-MAX_MESSAGE_TEXT_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_MESSAGE_TEXT_CHARS", "20000")))
-MAX_TOOL_SCHEMA_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_TOOL_SCHEMA_CHARS", "25000")))
-MAX_REQUEST_JSON_CHARS = max(1024, int(os.environ.get("ACADEMICAI_MAX_REQUEST_JSON_CHARS", "300000")))
+MAX_MESSAGES = max(1, int(os.environ.get("ACADEMICAI_MAX_MESSAGES", "300")))
+MAX_TOOLS = max(0, int(os.environ.get("ACADEMICAI_MAX_TOOLS", "256")))
+MAX_MESSAGE_TEXT_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_MESSAGE_TEXT_CHARS", "200000")))
+MAX_TOOL_SCHEMA_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_TOOL_SCHEMA_CHARS", "100000")))
+MAX_REQUEST_JSON_CHARS = max(1024, int(os.environ.get("ACADEMICAI_MAX_REQUEST_JSON_CHARS", "2000000")))
 
 RATE_LIMIT_PER_MINUTE = max(0, int(os.environ.get("ACADEMICAI_RATE_LIMIT_PER_MINUTE", "120")))
 _rate_limit_lock = threading.Lock()
@@ -626,29 +626,40 @@ def _build_humanization_messages(original_user_query: str, structured_content: s
 
 def _validate_chat_request_body(body: dict) -> None:
     if not isinstance(body, dict):
+        log.warning("Validation rejected (422): request body must be a JSON object")
         raise HTTPException(status_code=422, detail="request body must be a JSON object")
 
     model = body.get("model")
     if not isinstance(model, str) or not model.strip():
+        log.warning("Validation rejected (422): model must be a non-empty string")
         raise HTTPException(status_code=422, detail="model must be a non-empty string")
     if len(model.strip()) > 200:
+        log.warning(f"Validation rejected (422): model name too long ({len(model.strip())} chars > 200)")
         raise HTTPException(status_code=422, detail="model is too long")
 
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
+        log.warning("Validation rejected (422): messages must be a non-empty list")
         raise HTTPException(status_code=422, detail="messages must be a non-empty list")
     if len(messages) > MAX_MESSAGES:
+        log.warning(f"Validation rejected (413): messages count {len(messages)} exceeds limit ({MAX_MESSAGES})")
         raise HTTPException(status_code=413, detail=f"messages exceed limit ({MAX_MESSAGES})")
 
     for idx, msg in enumerate(messages):
         if not isinstance(msg, dict):
+            log.warning(f"Validation rejected (422): messages[{idx}] must be an object")
             raise HTTPException(status_code=422, detail=f"messages[{idx}] must be an object")
         role = msg.get("role")
         if not isinstance(role, str) or not role.strip():
+            log.warning(f"Validation rejected (422): messages[{idx}].role must be a non-empty string")
             raise HTTPException(status_code=422, detail=f"messages[{idx}].role must be a non-empty string")
 
         content_text = _extract_text_content(msg.get("content"))
         if len(content_text) > MAX_MESSAGE_TEXT_CHARS:
+            log.warning(
+                f"Validation rejected (413): messages[{idx}].content length {len(content_text)} chars "
+                f"exceeds limit ({MAX_MESSAGE_TEXT_CHARS} chars)"
+            )
             raise HTTPException(
                 status_code=413,
                 detail=f"messages[{idx}].content exceeds limit ({MAX_MESSAGE_TEXT_CHARS} chars)",
@@ -656,18 +667,27 @@ def _validate_chat_request_body(body: dict) -> None:
 
     tools = body.get("tools") or body.get("functions") or []
     if tools and not isinstance(tools, list):
+        log.warning("Validation rejected (422): tools/functions must be a list")
         raise HTTPException(status_code=422, detail="tools/functions must be a list")
     if isinstance(tools, list) and len(tools) > MAX_TOOLS:
+        log.warning(f"Validation rejected (413): tools count {len(tools)} exceeds limit ({MAX_TOOLS})")
         raise HTTPException(status_code=413, detail=f"tools exceed limit ({MAX_TOOLS})")
 
     for idx, tool in enumerate(tools or []):
         if not isinstance(tool, dict):
+            log.warning(f"Validation rejected (422): tools[{idx}] must be an object")
             raise HTTPException(status_code=422, detail=f"tools[{idx}] must be an object")
         try:
             schema_size = len(json.dumps(tool, ensure_ascii=False))
         except Exception:
+            log.warning(f"Validation rejected (422): tools[{idx}] is not JSON-serializable")
             raise HTTPException(status_code=422, detail=f"tools[{idx}] is not JSON-serializable")
         if schema_size > MAX_TOOL_SCHEMA_CHARS:
+            tool_name = (tool.get("function") or {}).get("name", f"index_{idx}")
+            log.warning(
+                f"Validation rejected (413): tool '{tool_name}' schema size {schema_size} chars "
+                f"exceeds limit ({MAX_TOOL_SCHEMA_CHARS} chars)"
+            )
             raise HTTPException(
                 status_code=413,
                 detail=f"tools[{idx}] exceeds limit ({MAX_TOOL_SCHEMA_CHARS} chars)",
@@ -869,14 +889,20 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     try:
         body = await request.json()
     except Exception:
+        log.warning("Chat request rejected (400): invalid JSON body")
         raise HTTPException(status_code=400, detail="invalid JSON body")
 
     try:
         request_size = len(json.dumps(body, ensure_ascii=False))
     except Exception:
+        log.warning("Chat request rejected (422): request body is not JSON-serializable")
         raise HTTPException(status_code=422, detail="request body is not JSON-serializable")
 
     if request_size > MAX_REQUEST_JSON_CHARS:
+        log.warning(
+            f"Chat request rejected (413): request body size {request_size} chars "
+            f"exceeds limit ({MAX_REQUEST_JSON_CHARS} chars)"
+        )
         raise HTTPException(status_code=413, detail=f"request body exceeds limit ({MAX_REQUEST_JSON_CHARS} chars)")
 
     _validate_chat_request_body(body)
@@ -1109,7 +1135,7 @@ if __name__ == "__main__":
     sys.stdout.write(f"  [API Key]       {'Active' if API_KEY else 'Missing/Insecure'}\n")
     sys.stdout.write(f"  [Log Rotation]  Active (30-day retention)\n")
     sys.stdout.write(f"  [Humanization]  {'Active (temp: ' + str(HUMANIZATION_TEMPERATURE) + ')' if ENABLE_HUMANIZATION_PASS else 'Disabled'}\n")
-    sys.stdout.write(f"  [Request Limits]  {MAX_MESSAGES} msg / {MAX_REQUEST_JSON_CHARS} char payload\n")
+    sys.stdout.write(f"  [Request Limits]  {MAX_MESSAGES} msg / {MAX_TOOLS} tools / {MAX_MESSAGE_TEXT_CHARS} msg-chars / {MAX_REQUEST_JSON_CHARS} json-chars\n")
     sys.stdout.write(f"  [Test Port]     11436 (isolated)\n")
     sys.stdout.write(" --------------------------------------------------------\n\n")
     sys.stdout.flush()

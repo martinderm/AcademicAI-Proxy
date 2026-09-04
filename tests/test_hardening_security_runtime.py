@@ -108,6 +108,47 @@ def test_chat_message_size_limit_returns_413(client, monkeypatch):
         json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hello"}]},
     )
     assert resp.status_code == 413
+    assert "content exceeds limit" in resp.text
+
+
+def test_chat_tools_count_limit_returns_413(client, monkeypatch):
+    monkeypatch.setattr(server, "MAX_TOOLS", 2)
+    tools = [
+        {"type": "function", "function": {"name": f"tool_{i}", "description": "test"}}
+        for i in range(3)
+    ]
+    resp = client.post(
+        "/v1/chat/completions",
+        headers=_auth_headers(),
+        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "tools": tools},
+    )
+    assert resp.status_code == 413
+    assert "tools exceed limit" in resp.text
+
+
+def test_chat_tool_schema_size_limit_returns_413(client, monkeypatch):
+    monkeypatch.setattr(server, "MAX_TOOL_SCHEMA_CHARS", 50)
+    tools = [
+        {"type": "function", "function": {"name": "oversized_tool", "description": "x" * 100}}
+    ]
+    resp = client.post(
+        "/v1/chat/completions",
+        headers=_auth_headers(),
+        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hi"}], "tools": tools},
+    )
+    assert resp.status_code == 413
+    assert "exceeds limit" in resp.text
+
+
+def test_chat_request_body_size_limit_returns_413(client, monkeypatch):
+    monkeypatch.setattr(server, "MAX_REQUEST_JSON_CHARS", 80)
+    resp = client.post(
+        "/v1/chat/completions",
+        headers=_auth_headers(),
+        json={"model": "gpt-5-mini", "messages": [{"role": "user", "content": "this payload will exceed eighty chars easily"}]},
+    )
+    assert resp.status_code == 413
+    assert "request body exceeds limit" in resp.text
 
 
 def test_chat_rate_limit_returns_429(client, monkeypatch):

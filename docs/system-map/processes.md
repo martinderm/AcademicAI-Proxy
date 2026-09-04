@@ -7,7 +7,7 @@
 
 ## 1. Request Lifecycle: `POST /v1/chat/completions`
 
-Jeder Chat-Completion-Request durchläuft eine 7-Stufen-Pipeline in [`server.py`](../../server.py):
+Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`](../../server.py):
 
 ```
 [Inbound Client Request]
@@ -16,28 +16,36 @@ Jeder Chat-Completion-Request durchläuft eine 7-Stufen-Pipeline in [`server.py`
  1. Authentifizierung & Insecure-Key-Check (Bearer Token)
        │
        ▼
- 2. Message-Normalisierung & Heuristiken:
+ 2. Payload-Validierung & Schutzgrenzen (_validate_chat_request_body & Rate-Limiting):
+    ├─ JSON-Größe vs. ACADEMICAI_MAX_REQUEST_JSON_CHARS (413 bei Übergröße)
+    ├─ Nachrichtenanzahl & Textlänge vs. ACADEMICAI_MAX_MESSAGES / MAX_MESSAGE_TEXT_CHARS (413)
+    ├─ Tools-Anzahl & Schema-Größe vs. ACADEMICAI_MAX_TOOLS / MAX_TOOL_SCHEMA_CHARS (413)
+    ├─ Strukturiertes Logging in server.log bei jeder Abweisung (413/422/400)
+    └─ Token-Bucket Rate-Limiting (429)
+       │
+       ▼
+ 3. Message-Normalisierung & Heuristiken:
     ├─ _extract_text_content (Plain-Text-Extraktion)
     ├─ _is_human_readable_target (Human Channel vs. Cron)
     ├─ _inject_skill_snippet_context (Skill-Snippets injecten)
     └─ _apply_post_tool_guard (Fehler-Schutz nach Tool-Result)
        │
        ▼
- 3. Tool-Injektion (inject_tools_into_messages in academicai/tool_emulation.py)
+ 4. Tool-Injektion (inject_tools_into_messages in academicai/tool_emulation.py)
     └─ Wandelt JSON-Tools in System-Prompt-Instruktionen um
        │
        ▼
- 4. BOKU-Backend HTTP-Aufruf (academicai.provider)
+ 5. BOKU-Backend HTTP-Aufruf (academicai.provider)
     └─ Übertragung mit X-Client-ID / X-Client-Secret & Azure Prefix Cache
        │
        ▼
- 5. Parsing & Safety-Filter:
+ 6. Parsing & Safety-Filter:
     ├─ parse_tool_calls (Extraktion von ```json ... ``` Calls)
     ├─ _enforce_write_before_mail_delete (Schutz vor unberechtigtem Mail-Löschen)
     └─ _extract_and_learn_tool_usage (Aktualisiert skill_snippets.json)
        │
        ▼
- 6. Response-Formatierung:
+ 7. Response-Formatierung:
     ├─ Streaming: SSE-Chunk-Generator (build_tool_calls_sse_chunks)
     └─ Non-Streaming: JSON Response (build_tool_calls_response)
        │

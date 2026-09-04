@@ -101,5 +101,11 @@ In `skill_snippets.json` persistierte Heuristik-Tipps:
 | `ACADEMICAI_DEBUG_DUMPS` | `bool` | Schreibt Rohdaten nach `last_backend_request.json` |
 | `ACADEMICAI_RETRY_MAX` | `int` (Default: `2`) | Maximale Retry-Wiederholungen bei Backend-Netzwerkfehlern |
 | `ACADEMICAI_RETRY_BASE_MS` | `int` (Default: `300`) | Basis-Wartezeit für exponentielles Backoff bei Retries |
+| `ACADEMICAI_MAX_MESSAGES` | `int` (Default: `300`) | Maximal zulässige Anzahl an Chat-Nachrichten pro Request (Schutzgrenze 413) |
+| `ACADEMICAI_MAX_TOOLS` | `int` (Default: `256`) | Maximal übermittelte Tool-Definitionen (Schutz vor 413 bei Tool-reichen Clients wie Copilot) |
+| `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` | `int` (Default: `200000`) | Max. Zeichenlänge pro Einzelnachricht (Text/Prompt-Payload; Schutzgrenze 413) |
+| `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` | `int` (Default: `100000`) | Max. Zeichenlänge pro Tool-JSON-Schema (Schutzgrenze 413) |
+| `ACADEMICAI_MAX_REQUEST_JSON_CHARS` | `int` (Default: `2000000`) | Max. Gesamtgröße des Request-JSON-Strings (Schutzgrenze 413) |
+| `ACADEMICAI_RATE_LIMIT_PER_MINUTE` | `int` (Default: `120`) | Max. Anfragen pro Minute pro IP/Token-Bucket (Schutzgrenze 429) |
 | `server.pid` | File (`int`) | Prozess-ID des laufenden Proxy-Daemons |
 | `server.log` | File | Aktiver Log-Stream mit täglicher Rotation (30 Tage Retention) |
