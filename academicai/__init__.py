@@ -66,6 +66,12 @@ from .tool_emulation import (  # noqa: F401
     strip_tool_call_tag,
     build_tool_calls_response,
     build_tool_calls_sse_chunks,
+    apply_post_tool_guard,
+    _apply_post_tool_guard,
+)
+from .transformation import (  # noqa: F401
+    extract_text_content,
+    _extract_text_content,
 )
 from .cost_monitoring import (  # noqa: F401
     read_cost_cache,
@@ -127,6 +133,8 @@ __all__ = [
     "enforce_chat_rate_limit", "_enforce_chat_rate_limit",
     "inject_tools_into_messages", "parse_tool_call", "strip_tool_call_tag",
     "build_tool_calls_response", "build_tool_calls_sse_chunks",
+    "apply_post_tool_guard", "_apply_post_tool_guard",
+    "extract_text_content", "_extract_text_content",
     "read_cost_cache", "_read_cost_cache",
     "write_cost_cache", "_write_cost_cache",
     "is_cost_cache_stale", "_is_cost_cache_stale",

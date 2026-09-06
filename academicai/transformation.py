@@ -7,6 +7,39 @@ import uuid
 from typing import Any
 
 
+def extract_text_content(content: Any) -> str:
+    """Extrahiert/normalisiert Text aus OpenAI-Message-Content (string oder list-content)."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                # {"type": "text", "text": "..."} oder {"type": "tool_result", "content": "..."}
+                if part.get("type") == "text":
+                    val = part.get("text", "")
+                    if val:
+                        parts.append(val)
+                elif part.get("type") == "tool_result":
+                    inner = part.get("content", "")
+                    res = extract_text_content(inner)
+                    if res:
+                        parts.append(res)
+                else:
+                    val = part.get("text") or part.get("content")
+                    if val:
+                        parts.append(str(val))
+        return "\n".join(parts)
+    return ""
+
+
+_extract_text_content = extract_text_content
+
+
 def _normalize_messages(messages: list) -> list:
     """
     Normalisiert Messages für das AcademicAI-Backend:
@@ -16,37 +49,15 @@ def _normalize_messages(messages: list) -> list:
     AcademicAI unterstützt nur: user / assistant
     """
     # 1. System-Messages extrahieren
-    system_parts = [m["content"] for m in messages if m.get("role") == "system"]
+    system_parts = [extract_text_content(m.get("content")) for m in messages if m.get("role") == "system"]
+    system_parts = [p for p in system_parts if p]
     non_system = [m for m in messages if m.get("role") != "system"]
-
-    def _extract_text(content) -> str:
-        """Extrahiert Text aus string oder list-content (multi-part)."""
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts = []
-            for part in content:
-                if isinstance(part, str):
-                    parts.append(part)
-                elif isinstance(part, dict):
-                    # {"type": "text", "text": "..."} oder {"type": "tool_result", "content": "..."}
-                    if part.get("type") == "text":
-                        parts.append(part.get("text", ""))
-                    elif part.get("type") == "tool_result":
-                        inner = part.get("content", "")
-                        parts.append(_extract_text(inner))
-                    else:
-                        parts.append(str(part.get("text") or part.get("content") or ""))
-            return "\n".join(p for p in parts if p)
-        return str(content)
 
     # 2. tool / tool_calls normalisieren
     normalized = []
     for m in non_system:
         role = m.get("role")
-        content = _extract_text(m.get("content"))
+        content = extract_text_content(m.get("content"))
 
         if role == "tool":
             # Tool-Result als user-Message mit standardisiertem <tool_result>-Tag

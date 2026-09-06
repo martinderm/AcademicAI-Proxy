@@ -304,7 +304,7 @@ Das Modul [`academicai/humanization.py`](../../academicai/humanization.py) kapse
 
 ### User-Text-Extraktion (`last_user_text`, `_last_user_text`)
 - Durchsucht die Nachrichten-Historie rückwärts nach der letzten Nachricht mit `role == "user"`.
-- Verwendet `extract_text_content` aus [`academicai/request_guards.py`](../../academicai/request_guards.py) zur robusten Extraktion sowohl aus Plain-Strings als auch aus Multi-Part-/Dict-Strukturen.
+- Verwendet `extract_text_content` aus [`academicai/transformation.py`](../../academicai/transformation.py) zur robusten Extraktion sowohl aus Plain-Strings als auch aus Multi-Part-/Dict-Strukturen.
 
 ### Prompt-Konstruktion (`build_humanization_messages`, `_build_humanization_messages`)
 - Baut eine 2-Turn-Nachrichtenliste für den optionalen zweiten LLM-Pass:
@@ -323,6 +323,36 @@ Das Modul [`academicai/humanization.py`](../../academicai/humanization.py) kapse
   - Stellt sicher, dass bestehende Test-Suiten mit `monkeypatch.setattr(server, ...)` ohne Anpassung funktionieren.
 - **Server- und Package-Re-Exports:**
   - `server.py` und `academicai/__init__.py` exportieren alle 8 Funktionen und Aliase (`build_humanization_messages`, `_build_humanization_messages`, `is_human_readable_target`, `_is_human_readable_target`, `last_user_text`, `_last_user_text`, `run_humanization_pass`, `_run_humanization_pass`).
+
+---
+
+## 10. Application Factory & Modern Lifespan ([`academicai/app.py`](../../academicai/app.py))
+
+Das Modul [`academicai/app.py`](../../academicai/app.py) kapselt die FastAPI-Anwendungsinstanziierung, den modernen ASGI-Lifespan-Handler sowie das zentrale Routing aller öffentlichen und internen HTTP-Endpunkte:
+
+### Modern Lifespan Management (`lifespan`)
+- **Ersatz für `@app.on_event`:** Ersetzt die veralteten `@app.on_event("startup")` und `@app.on_event("shutdown")`-Dekoratoren vollständig durch einen standardkonformen Starlette/FastAPI `@asynccontextmanager async def lifespan(application: FastAPI)`-Handler.
+- **Startup Phase:** Führt `validate_config()` (Integritätsprüfung des API-Keys) und `write_pid_file()` (Registrierung der Prozess-ID) aus, bevor Anfragen verarbeitet werden.
+- **Shutdown Phase:** Ruft `cleanup_pid_file()` im `finally`-Block auf, um die PID-Datei bei Beendigung des Prozesses sauber zu entfernen.
+
+### Application Factory (`create_app`)
+- Instanziiert und konfiguriert die `FastAPI`-Applikation mit Metadaten (`title="AcademicAI Proxy"`, `version="1.0.0"`) und bindet den `lifespan`-Kontextmanager ein.
+- Registriert alle HTTP-Routen deklarativ:
+  - `GET /health` $\to$ `health`
+  - `GET /internal/cost-status` $\to$ `cost_status` (authentifiziert via `verify_key`)
+  - `GET /v1/models` $\to$ `list_models` (authentifiziert via `verify_key`)
+  - `POST /v1/chat/completions` $\to$ `chat_completions` (Request-Guards, Rate-Limiting, Tool-Emulation, Streaming, Humanisierung)
+- Stellt eine modulweite Singleton-Instanz `app = create_app()` bereit.
+
+### Dynamische Attributauflösung (`_get_setting`, `_INITIAL_DEFAULTS`)
+- Kapselt dynamische Konfigurations- und Funktionsauflösung zur Unterstützung bestehender Test-Suiten:
+  - Erkennt `monkeypatch.setattr(server, ...)` und `monkeypatch.setattr(academicai.app, ...)` präzise durch Abgleich mit `_INITIAL_DEFAULTS`.
+  - Gewährleistet nahtlose Weiterleitung von `API_KEY`, Schutzgrenzen, Modelllisten und Completion-Funktionen.
+
+### Entkoppelte Tool-Guards & Text-Extraktion
+- **`academicai/tool_emulation.py`:** Beherbergt `apply_post_tool_guard` / `_apply_post_tool_guard` (Follow-up-Stabilisierung nach Tool-Ergebnissen).
+- **`academicai/transformation.py`:** Konsolidiert `extract_text_content` / `_extract_text_content` (Normalisierung von Strings und Multipart-Dicts) als Single Source of Truth.
+
 
 
 

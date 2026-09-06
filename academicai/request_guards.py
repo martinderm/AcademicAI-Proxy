@@ -27,20 +27,7 @@ _last_rate_limit_sweep: float = 0.0
 DEFAULT_SWEEP_INTERVAL_SECONDS: float = 60.0
 
 
-def extract_text_content(msg_content: Any) -> str:
-    """Normalisiert OpenAI-Message-Content zu Plain-Text."""
-    if isinstance(msg_content, str):
-        return msg_content
-    if isinstance(msg_content, list):
-        parts = []
-        for item in msg_content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                parts.append(item.get("text", ""))
-        return "\n".join(parts)
-    return ""
-
-
-_extract_text_content = extract_text_content
+from academicai.transformation import extract_text_content, _extract_text_content
 
 
 def _get_limit(name: str, explicit_value: Optional[Any] = None) -> Any:

@@ -5,9 +5,34 @@
 
 ---
 
-## 1. Request Lifecycle: `POST /v1/chat/completions`
+## 1. Server Startup & Request Lifecycle (`academicai/app.py`, `server.py`)
 
-Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`](../../server.py), gesteuert durch die zentralen Richtlinien und Limits aus [`academicai/config.py`](../../academicai/config.py):
+### Server Startup & Lifespan Pipeline
+Der Server-Lifecycle wird modern über FastAPI Lifespan Events gesteuert:
+
+```
+[Server Process Launch (server.py / uvicorn)]
+       │
+       ▼
+ 1. Lifespan Startup (academicai/app.py: lifespan):
+    ├─ validate_config() (Proxy-API-Key Integritätsprüfung)
+    └─ write_pid_file() (Registrierung der aktuellen PID in server.pid)
+       │
+       ▼
+ 2. Request Handling Phase (Active HTTP Server):
+    ├─ GET /health (Backend Health Check & Latenzmessung)
+    ├─ GET /internal/cost-status (Cost Status Snapshot aus Cache)
+    ├─ GET /v1/models (Modell-Discovery)
+    └─ POST /v1/chat/completions (8-Stufen Completion Pipeline)
+       │
+       ▼
+ 3. Lifespan Shutdown (academicai/app.py: lifespan finally):
+    └─ cleanup_pid_file() (Sicheres Entfernen der PID-Datei bei passendem PID-Match)
+```
+
+### Request Lifecycle: `POST /v1/chat/completions`
+
+Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`academicai/app.py`](../../academicai/app.py) (exponiert über [`server.py`](../../server.py)), gesteuert durch die zentralen Richtlinien und Limits aus [`academicai/config.py`](../../academicai/config.py):
 
 ```
 [Inbound Client Request]
@@ -24,10 +49,10 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
     └─ Token-Bucket Rate-Limiting mit periodischem TTL-Sweep (academicai/request_guards.py) vs. RATE_LIMIT_PER_MINUTE / RATE_LIMIT_WINDOW_SECONDS (429)
        │
        ▼
- 3. Message-Normalisierung & Heuristiken (academicai/humanization.py & request_guards.py):
-    ├─ last_user_text & extract_text_content (Plain-Text-Extraktion)
+ 3. Message-Normalisierung & Heuristiken (academicai/transformation.py & humanization.py & tool_emulation.py):
+    ├─ last_user_text & extract_text_content (Plain-Text-Extraktion via academicai/transformation.py)
     ├─ is_human_readable_target (Human Channel vs. Cron)
-    └─ _apply_post_tool_guard (Fehler-Schutz nach Tool-Result)
+    └─ apply_post_tool_guard (Fehler-Schutz nach Tool-Result in academicai/tool_emulation.py)
        │
        ▼
  4. Tool-Injektion (inject_tools_into_messages in academicai/tool_emulation.py)
@@ -186,6 +211,7 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_cost_monitoring_unit.py` | Unit-Tests für akademische Kostenüberwachung: Parsing (`_safe_float`, `_parse_iso_ts`), Payload-Extraktion (`_extract_cost_summary`), Stale-Prüfung (`is_cost_cache_stale`), Header-Generierung (`build_cost_headers`), atomare Cache-Roundtrips, Thread-Sicherheit und Server-Re-Exports. |
 | `test_runtime_unit.py` | Unit-Tests für Laufzeit-Lifecycle: PID-File-Erstellung und -Bereinigung mit PID-Matching, Backend-Health-Checks (Erfolg, Timeout, Fehler, Deaktivierung), Health-Payload-Generierung (`ok`/`degraded`) und Server-Re-Exports. |
 | `test_logging_config_unit.py` | Unit-Tests für Logging-Konfiguration: Formatter, rotierende File-Handler (Info & Error), Konsolen-Handler, Uvicorn-Logger-Wiring (propagate=False), dynamische Pfadauflösung, Windows-kompatibles Schließen via close_handlers und Server-Re-Exports. |
+| `test_app_unit.py` | Unit-Tests für Application Factory (`create_app`), modernen ASGI-Lifespan (Startup/Shutdown Hooks, Starlette TestClient), Routing-Delegation (`/health`, `/internal/cost-status`, `/v1/models`, `/v1/chat/completions`), Fehlerbehandlung (502) sowie `apply_post_tool_guard` und Server-Re-Exports. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
 
 

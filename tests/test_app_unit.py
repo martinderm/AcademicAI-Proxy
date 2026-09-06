@@ -1,0 +1,271 @@
+﻿"""
+Unit tests for academicai.app module (FastAPI application factory & lifespan).
+
+Validates:
+- create_app() instantiates a FastAPI app with required routes (/health, /internal/cost-status, /v1/models, /v1/chat/completions)
+- Lifespan context manager executes startup (validate_config, write_pid_file) and shutdown (cleanup_pid_file) hooks
+- Lifespan execution via TestClient context manager
+- Route handler direct execution and delegation: health, cost_status, list_models, verify_key
+- Error handling in list_models (502 on failure)
+- Tool post-guard in academicai.tool_emulation (apply_post_tool_guard and _apply_post_tool_guard)
+- Backward compatibility re-exports on server and academicai packages
+"""
+
+import asyncio
+import inspect
+import pytest
+from fastapi import FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.testclient import TestClient
+
+import academicai
+import academicai.app as ai_app
+from academicai.app import (
+    create_app,
+    app,
+    lifespan,
+    verify_key,
+    health,
+    cost_status,
+    list_models,
+    chat_completions,
+)
+from academicai.tool_emulation import (
+    apply_post_tool_guard,
+    _apply_post_tool_guard,
+)
+from academicai.transformation import (
+    extract_text_content,
+    _extract_text_content,
+)
+import server
+
+
+def _run(coro):
+    return asyncio.run(coro)
+
+
+# ---------------------------------------------------------------------------
+# 1. create_app Instantiation & Route Registration
+# ---------------------------------------------------------------------------
+
+
+def test_create_app_instantiates_fastapi_with_routes():
+    test_app = create_app()
+    assert isinstance(test_app, FastAPI)
+    assert test_app.title == "AcademicAI Proxy"
+
+    registered = {}
+    for route in test_app.routes:
+        if hasattr(route, "methods") and hasattr(route, "path"):
+            registered[route.path] = route.methods
+
+    assert "/health" in registered
+    assert "GET" in registered["/health"]
+
+    assert "/internal/cost-status" in registered
+    assert "GET" in registered["/internal/cost-status"]
+
+    assert "/v1/models" in registered
+    assert "GET" in registered["/v1/models"]
+
+    assert "/v1/chat/completions" in registered
+    assert "POST" in registered["/v1/chat/completions"]
+
+
+def test_module_level_app_instance():
+    assert isinstance(app, FastAPI)
+    assert app.title == "AcademicAI Proxy"
+
+
+# ---------------------------------------------------------------------------
+# 2. Modern Lifespan Handler Execution
+# ---------------------------------------------------------------------------
+
+
+def test_lifespan_lifecycle_direct(monkeypatch):
+    events = []
+    monkeypatch.setattr(ai_app, "validate_config", lambda: events.append("validate_config"))
+    monkeypatch.setattr(ai_app, "write_pid_file", lambda: events.append("write_pid_file"))
+    monkeypatch.setattr(ai_app, "cleanup_pid_file", lambda: events.append("cleanup_pid_file"))
+
+    async def _test():
+        test_app = create_app()
+        async with lifespan(test_app):
+            assert events == ["validate_config", "write_pid_file"]
+        assert events == ["validate_config", "write_pid_file", "cleanup_pid_file"]
+
+    _run(_test())
+
+
+def test_lifespan_via_test_client(monkeypatch):
+    events = []
+    monkeypatch.setattr(ai_app, "validate_config", lambda: events.append("start_config"))
+    monkeypatch.setattr(ai_app, "write_pid_file", lambda: events.append("start_pid"))
+    monkeypatch.setattr(ai_app, "cleanup_pid_file", lambda: events.append("stop_pid"))
+
+    test_app = create_app()
+    with TestClient(test_app):
+        assert "start_config" in events
+        assert "start_pid" in events
+        assert "stop_pid" not in events
+    assert "stop_pid" in events
+
+
+# ---------------------------------------------------------------------------
+# 3. Route Handlers Delegation & Unit Behavior
+# ---------------------------------------------------------------------------
+
+
+def test_health_handler_delegation(monkeypatch):
+    monkeypatch.setattr(ai_app, "check_backend_health", lambda: {"enabled": True, "ok": True, "latency_ms": 7})
+    payload = health()
+    assert isinstance(payload, dict)
+    assert payload.get("status") == "ok"
+    assert payload.get("service") == "academicai-proxy"
+    assert payload.get("backend", {}).get("ok") is True
+
+
+def test_cost_status_handler_delegation(monkeypatch):
+    mock_cache = {
+        "total_cost": 15.25,
+        "total_clients": 2,
+        "cost_entries": 4,
+        "updated_at": "2026-09-06T12:00:00+00:00",
+        "source": "cache",
+    }
+    monkeypatch.setattr(ai_app, "get_cost_cache_with_lazy_refresh", lambda: mock_cache)
+    payload = cost_status(key="valid-key")
+    assert isinstance(payload, dict)
+    assert payload.get("total_cost") == 15.25
+    assert payload.get("total_clients") == 2
+    assert payload.get("source") == "cache"
+
+
+def test_list_models_handler_success(monkeypatch):
+    mock_models = {
+        "object": "list",
+        "data": [{"id": "gpt-4o", "object": "model", "owned_by": "academicai"}],
+    }
+    monkeypatch.setattr(academicai, "get_models", lambda: mock_models)
+    res = _run(list_models(key="valid-key"))
+    assert res == mock_models
+
+
+def test_list_models_handler_error_raises_502(monkeypatch):
+    def _fail():
+        raise RuntimeError("backend unreachable")
+
+    monkeypatch.setattr(academicai, "get_models", _fail)
+    with pytest.raises(HTTPException) as exc_info:
+        _run(list_models(key="valid-key"))
+    assert exc_info.value.status_code == 502
+    assert "backend unreachable" in exc_info.value.detail
+
+
+def test_verify_key_behavior(monkeypatch):
+    monkeypatch.setattr(ai_app, "_get_setting", lambda name, default=None: "secret-key" if name == "API_KEY" else default)
+
+    # Success case
+    creds_ok = HTTPAuthorizationCredentials(scheme="Bearer", credentials="secret-key")
+    assert verify_key(creds_ok) == "secret-key"
+
+    # Mismatch case
+    creds_bad = HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong-key")
+    with pytest.raises(HTTPException) as exc_bad:
+        verify_key(creds_bad)
+    assert exc_bad.value.status_code == 401
+
+    # Missing credentials case
+    with pytest.raises(HTTPException) as exc_none:
+        verify_key(None)
+    assert exc_none.value.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# 4. apply_post_tool_guard from academicai.tool_emulation
+# ---------------------------------------------------------------------------
+
+
+def test_apply_post_tool_guard_alias_and_cases():
+    assert _apply_post_tool_guard is apply_post_tool_guard
+
+    # Case 1: has_tools is False -> unchanged
+    msgs = [{"role": "tool", "content": "OK"}]
+    assert apply_post_tool_guard(msgs, has_tools=False) == msgs
+
+    # Case 2: empty messages -> unchanged
+    assert apply_post_tool_guard([], has_tools=True) == []
+
+    # Case 3: last message not role=tool -> unchanged
+    msgs_user = [{"role": "user", "content": "Hello"}]
+    assert apply_post_tool_guard(msgs_user, has_tools=True) == msgs_user
+
+    # Case 4: last message tool without error -> NO_FURTHER_TOOL_CALLS
+    msgs_ok = [
+        {"role": "user", "content": "Find info"},
+        {"role": "tool", "content": "File contents here"},
+    ]
+    guarded_ok = apply_post_tool_guard(msgs_ok, has_tools=True)
+    assert len(guarded_ok) == 3
+    assert guarded_ok[0]["role"] == "system"
+    assert "NO_FURTHER_TOOL_CALLS" in guarded_ok[0]["content"]
+
+    # Case 5: last message tool with error -> TOOL_RESULT_ERROR
+    msgs_err = [
+        {"role": "user", "content": "Find info"},
+        {"role": "tool", "content": "Error: File not found exception"},
+    ]
+    guarded_err = apply_post_tool_guard(msgs_err, has_tools=True)
+    assert len(guarded_err) == 3
+    assert guarded_err[0]["role"] == "system"
+    assert "TOOL_RESULT_ERROR" in guarded_err[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# 5. Re-exports and Aliases Verification
+# ---------------------------------------------------------------------------
+
+
+def test_backward_compatibility_server_and_academicai_reexports():
+    server_symbols = [
+        "create_app",
+        "app",
+        "lifespan",
+        "verify_key",
+        "health",
+        "cost_status",
+        "list_models",
+        "chat_completions",
+        "apply_post_tool_guard",
+        "_apply_post_tool_guard",
+        "extract_text_content",
+        "_extract_text_content",
+    ]
+
+    for sym in server_symbols:
+        assert hasattr(server, sym), f"server is missing expected re-export: {sym}"
+
+    package_symbols = [
+        "apply_post_tool_guard",
+        "_apply_post_tool_guard",
+        "extract_text_content",
+        "_extract_text_content",
+    ]
+
+    for sym in package_symbols:
+        assert hasattr(academicai, sym), f"academicai is missing expected re-export: {sym}"
+
+    app_module_symbols = [
+        "create_app",
+        "app",
+        "lifespan",
+        "verify_key",
+        "health",
+        "cost_status",
+        "list_models",
+        "chat_completions",
+    ]
+
+    for sym in app_module_symbols:
+        assert hasattr(ai_app, sym), f"academicai.app is missing expected symbol: {sym}"

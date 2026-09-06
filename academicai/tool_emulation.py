@@ -22,6 +22,8 @@ import re
 import uuid
 from typing import Optional, Any
 
+from academicai.transformation import extract_text_content, _extract_text_content
+
 
 def _repair_json_str(raw: str) -> str:
     """Bereinigt gängige LLM-JSON-Syntaxfehler wie Trailing Commas vor } oder ]."""
@@ -712,3 +714,44 @@ def build_tool_calls_sse_chunks(
             "choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}],
         },
     ]
+
+
+# ---------------------------------------------------------------------------
+# Post-Tool Follow-up Guard
+# ---------------------------------------------------------------------------
+
+def apply_post_tool_guard(messages: list, has_tools: bool) -> list:
+    """
+    Stabilisiert den Follow-up-Schritt nach einem Tool-Result.
+    - Erfolgreiches Tool-Result: finale Antwort bevorzugen.
+    - Fehlerhaftes Tool-Result: Erfolg NICHT behaupten, sondern korrigierten
+      Tool-Call auslösen oder Fehler transparent melden.
+    """
+    if not has_tools or not messages:
+        return messages
+
+    last = messages[-1] or {}
+    if last.get("role") != "tool":
+        return messages
+
+    tool_text = extract_text_content(last.get("content")).lower()
+    has_error = any(tok in tool_text for tok in ["error:", "cannot parse", "failed", "not found", "exception"])
+
+    if has_error:
+        guard_text = (
+            "TOOL_RESULT_ERROR: The latest tool result contains an error. "
+            "Do NOT claim success. Either issue a corrected tool_call, or explain the failure clearly. "
+            "For mailbox envelope search, keep options before query, e.g. envelope list -s 50 \"from alerts@example.com\"."
+        )
+    else:
+        guard_text = (
+            "NO_FURTHER_TOOL_CALLS: You already received tool results. "
+            "Now produce the final user-facing answer. "
+            "Call another tool only if the latest tool result is clearly missing required data."
+        )
+
+    return [{"role": "system", "content": guard_text}] + messages
+
+
+_apply_post_tool_guard = apply_post_tool_guard
+
