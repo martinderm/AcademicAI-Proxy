@@ -67,6 +67,25 @@ from .tool_emulation import (  # noqa: F401
     build_tool_calls_response,
     build_tool_calls_sse_chunks,
 )
+from .cost_monitoring import (  # noqa: F401
+    read_cost_cache,
+    _read_cost_cache,
+    write_cost_cache,
+    _write_cost_cache,
+    is_cost_cache_stale,
+    _is_cost_cache_stale,
+    build_cost_headers,
+    _build_cost_headers,
+    fetch_cost_snapshot,
+    _fetch_cost_snapshot,
+    refresh_cost_cache_sync,
+    _refresh_cost_cache_sync,
+    refresh_cost_cache_background,
+    _refresh_cost_cache_background,
+    get_cost_cache_with_lazy_refresh,
+    _get_cost_cache_with_lazy_refresh,
+    get_cost_status_payload,
+)
 
 __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
@@ -78,4 +97,14 @@ __all__ = [
     "enforce_chat_rate_limit", "_enforce_chat_rate_limit",
     "inject_tools_into_messages", "parse_tool_call", "strip_tool_call_tag",
     "build_tool_calls_response", "build_tool_calls_sse_chunks",
+    "read_cost_cache", "_read_cost_cache",
+    "write_cost_cache", "_write_cost_cache",
+    "is_cost_cache_stale", "_is_cost_cache_stale",
+    "build_cost_headers", "_build_cost_headers",
+    "fetch_cost_snapshot", "_fetch_cost_snapshot",
+    "refresh_cost_cache_sync", "_refresh_cost_cache_sync",
+    "refresh_cost_cache_background", "_refresh_cost_cache_background",
+    "get_cost_cache_with_lazy_refresh", "_get_cost_cache_with_lazy_refresh",
+    "get_cost_status_payload",
 ]
+

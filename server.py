@@ -207,164 +207,31 @@ from academicai.config import (
     RETRY_MAX,
     RETRY_BASE_MS,
 )
-
-_cost_lock = threading.Lock()
-_cost_refresh_in_flight = False
-
-
-def _now_utc_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _parse_iso_ts(raw: str) -> Optional[datetime]:
-    if not raw:
-        return None
-    try:
-        value = raw.replace("Z", "+00:00")
-        return datetime.fromisoformat(value)
-    except Exception:
-        return None
-
-
-def _safe_float(value) -> Optional[float]:
-    try:
-        return float(value)
-    except Exception:
-        return None
-
-
-def _extract_cost_summary(payload: dict) -> dict:
-    root = payload if isinstance(payload, dict) else {}
-    data = root.get("data") if isinstance(root.get("data"), dict) else root
-
-    total_cost = _safe_float(data.get("totalCost"))
-    total_clients = data.get("totalClients")
-    costs = data.get("costs") if isinstance(data.get("costs"), list) else []
-
-    try:
-        total_clients = int(total_clients) if total_clients is not None else None
-    except Exception:
-        total_clients = None
-
-    return {
-        "total_cost": total_cost,
-        "total_clients": total_clients,
-        "cost_entries": len(costs),
-    }
-
-
-def _read_cost_cache() -> dict:
-    p = Path(COST_CACHE_FILE)
-    if not p.exists():
-        return {}
-    try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _write_cost_cache(cache: dict) -> None:
-    p = Path(COST_CACHE_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _is_cost_cache_stale(cache: dict) -> bool:
-    ts = _parse_iso_ts(str(cache.get("updated_at", "")))
-    if ts is None:
-        return True
-    return (datetime.now(timezone.utc) - ts).total_seconds() > COST_CACHE_TTL_SECONDS
-
-
-def _build_cost_headers(cache: dict) -> dict:
-    if not ENABLE_COST_MONITORING:
-        return {}
-    if not cache:
-        return {}
-    headers = {
-        "X-AcademicAI-Cost-Stale": "true" if _is_cost_cache_stale(cache) else "false",
-    }
-    updated_at = str(cache.get("updated_at", "")).strip()
-    if updated_at:
-        headers["X-AcademicAI-Cost-Updated-At"] = updated_at
-
-    total_cost = _safe_float(cache.get("total_cost"))
-    if total_cost is not None:
-        headers["X-AcademicAI-Total-Cost"] = f"{total_cost:.6f}".rstrip("0").rstrip(".")
-
-    total_clients = cache.get("total_clients")
-    if isinstance(total_clients, int):
-        headers["X-AcademicAI-Total-Clients"] = str(total_clients)
-
-    cost_entries = cache.get("cost_entries")
-    if isinstance(cost_entries, int):
-        headers["X-AcademicAI-Cost-Entries"] = str(cost_entries)
-
-    return headers
-
-
-def _fetch_cost_snapshot() -> dict:
-    if not ENABLE_COST_MONITORING:
-        return {}
-
-    base_url = get_base_url().rstrip("/")
-    cost_url = f"{base_url}/api/v1/cost/"
-    headers = dict(get_headers() or {})
-    headers.setdefault("Accept", "application/json")
-
-    with httpx.Client(timeout=COST_REFRESH_TIMEOUT_SECONDS, follow_redirects=True) as client:
-        resp = client.get(cost_url, headers=headers)
-        resp.raise_for_status()
-        payload = resp.json()
-
-    summary = _extract_cost_summary(payload)
-    return {
-        "updated_at": _now_utc_iso(),
-        "source": "live",
-        "raw": payload,
-        **summary,
-    }
-
-
-def _refresh_cost_cache_sync() -> dict:
-    if not ENABLE_COST_MONITORING:
-        return _read_cost_cache()
-
-    with _cost_lock:
-        fresh = _fetch_cost_snapshot()
-        if fresh:
-            _write_cost_cache(fresh)
-        return fresh
-
-
-async def _refresh_cost_cache_background() -> None:
-    global _cost_refresh_in_flight
-    try:
-        await run_in_threadpool(_refresh_cost_cache_sync)
-    except Exception as e:
-        log.warning(f"cost refresh failed: {e}")
-    finally:
-        _cost_refresh_in_flight = False
-
-
-def _get_cost_cache_with_lazy_refresh() -> dict:
-    global _cost_refresh_in_flight
-    cache = _read_cost_cache()
-
-    if not ENABLE_COST_MONITORING:
-        return cache
-
-    if _is_cost_cache_stale(cache) and not _cost_refresh_in_flight:
-        try:
-            loop = asyncio.get_running_loop()
-            _cost_refresh_in_flight = True
-            loop.create_task(_refresh_cost_cache_background())
-        except RuntimeError:
-            # Kein laufender Loop (z.B. in unit tests) -> synchron vermeiden
-            pass
-
-    return cache
+from academicai.cost_monitoring import (
+    _cost_lock,
+    _cost_refresh_in_flight,
+    _now_utc_iso,
+    _parse_iso_ts,
+    _safe_float,
+    _extract_cost_summary,
+    _read_cost_cache,
+    _write_cost_cache,
+    _is_cost_cache_stale,
+    _build_cost_headers,
+    _fetch_cost_snapshot,
+    _refresh_cost_cache_sync,
+    _refresh_cost_cache_background,
+    _get_cost_cache_with_lazy_refresh,
+    read_cost_cache,
+    write_cost_cache,
+    is_cost_cache_stale,
+    build_cost_headers,
+    fetch_cost_snapshot,
+    refresh_cost_cache_sync,
+    refresh_cost_cache_background,
+    get_cost_cache_with_lazy_refresh,
+    get_cost_status_payload,
+)
 
 
 def _build_humanization_messages(original_user_query: str, structured_content: str) -> list:
@@ -534,15 +401,8 @@ def health():
 @app.get("/internal/cost-status")
 def cost_status(key: str = Depends(verify_key)):
     cache = _get_cost_cache_with_lazy_refresh()
-    return {
-        "enabled": ENABLE_COST_MONITORING,
-        "total_cost": _safe_float(cache.get("total_cost")),
-        "total_clients": cache.get("total_clients"),
-        "cost_entries": cache.get("cost_entries"),
-        "updated_at": cache.get("updated_at"),
-        "is_stale": _is_cost_cache_stale(cache) if cache else True,
-        "source": cache.get("source", "cache" if cache else "none"),
-    }
+    return get_cost_status_payload(cache)
+
 
 
 # --- Models ---

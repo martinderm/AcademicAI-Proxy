@@ -172,3 +172,47 @@ Das Modul [`academicai/request_guards.py`](../../academicai/request_guards.py) k
   - `server.py` re-exportiert `_validate_chat_request_body`, `_enforce_chat_rate_limit`, `_rate_limit_bucket`, `_rate_limit_buckets` und `_rate_limit_lock`.
   - Die interne Auflösung (`_get_limit`) prüft dynamisch Attribute auf dem `server`-Modul, sodass bestehende `monkeypatch.setattr(server, ...)`-Tests unverändert funktionieren.
 
+---
+
+## 6. Cost-Monitoring & Cache-Lifecycle ([`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py))
+
+Das Modul [`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py) kapselt die Kostenüberwachung des BOKU-Backends, das lokale Datei-Caching sowie die Generierung von Kosten-Headern.
+
+### Lokales Caching & atomare Datei-Operationen
+- **Atomares Schreiben (`write_cost_cache`):**
+  - Schreibt neue Snapshots in eine temporäre Datei (`tempfile.NamedTemporaryFile`) im Zielverzeichnis, führt `flush()` und `os.fsync()` aus und ersetzt die Zieldatei atomar via `os.replace()`.
+  - Windows-Absicherung: Enthält eine Retry-Schleife gegen kurzzeitige File-Sharing-Sperren (`PermissionError: [WinError 5]`).
+  - Thread-Sicherheit: Schreib- und Lesezugriffe sind über ein reentrantes Thread-Lock (`_cost_lock = threading.RLock()`) geschützt.
+  - Automatische Verzeichniserstellung (`p.parent.mkdir(parents=True, exist_ok=True)`).
+- **Fehlertolerantes Lesen (`read_cost_cache`):**
+  - Liefert bei fehlender oder korrupter Cache-Datei ein leeres Dictionary `{}` zurück, ohne Exceptions zu werfen.
+
+### Stale-Erkennung & Lazy Background Refresh
+- **Stale-Prüfung (`is_cost_cache_stale`):**
+  - Vergleicht den UTC-Zeitstempel `updated_at` mit der aktuellen Zeit gegen `COST_CACHE_TTL_SECONDS` (Default: 600s).
+  - Robust gegen unvollständige Payloads, ungültige Datumsformate und Zeitzonen-Mischungen.
+- **Lazy Refresh (`get_cost_cache_with_lazy_refresh`):**
+  - Liefert bei Chat-Completion-Requests sofort den vorhandenen Cache-Stand aus (non-blocking).
+  - Erkennt einen abgelaufenen Cache (`is_cost_cache_stale`) und stößt bei Bedarf einen asynchronen Background-Task an (`refresh_cost_cache_background` via `loop.create_task` & `run_in_threadpool`).
+  - Ein In-Flight-Guard (`_cost_refresh_in_flight`) verhindert parallele Stampede-Refreshes.
+
+### Response-Header & Status-Payload
+- **Header-Generierung (`build_cost_headers`):**
+  - Liefert `{}` wenn `ENABLE_COST_MONITORING=False` oder der Cache leer ist.
+  - Generiert bei aktivem Monitoring:
+    - `X-AcademicAI-Cost-Stale`: `"true"` oder `"false"`
+    - `X-AcademicAI-Cost-Updated-At`: ISO-8601-Zeitstempel
+    - `X-AcademicAI-Total-Cost`: Formatierte Gesamtkosten (Fließkommazahl ohne überflüssige Nullen)
+    - `X-AcademicAI-Total-Clients`: Anzahl erfasster Clients
+    - `X-AcademicAI-Cost-Entries`: Anzahl an Einzelkosten-Einträgen
+- **Status-Payload (`get_cost_status_payload`):**
+  - Zentralisiert die Struktur für den internen Endpunkt `GET /internal/cost-status` mit Feldern `enabled`, `total_cost`, `total_clients`, `cost_entries`, `updated_at`, `is_stale`, `source`.
+
+### Dynamische Attributauflösung & Rückwärtskompatibilität
+- **Dynamische Konfiguration (`_get_setting`):**
+  - Sucht Einstellungen (`ENABLE_COST_MONITORING`, `COST_CACHE_FILE`, `COST_CACHE_TTL_SECONDS`, `COST_REFRESH_TIMEOUT_SECONDS`) zuerst auf dem geladenen `server`-Modul und fällt danach auf `academicai.config` zurück.
+  - Dadurch bleiben Unit- und Integrationstests, die Werte auf `server` mittels `monkeypatch.setattr(...)` überschreiben, uneingeschränkt funktionsfähig.
+- **Server-Re-Exports:**
+  - `server.py` re-exportiert alle wesentlichen Symbole (`_get_cost_cache_with_lazy_refresh`, `_build_cost_headers`, `_is_cost_cache_stale`, `_safe_float`, `_read_cost_cache`, `_write_cost_cache`, `_cost_lock`).
+
+

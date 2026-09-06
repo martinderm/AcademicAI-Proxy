@@ -88,7 +88,23 @@ HTTP-Aufrufe an das BOKU-Backend sind gegen transiente Netzwerkfehler abgesicher
 
 ---
 
-## 5. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
+## 5. Cost-Monitoring & Lazy Cache Lifecycle ([`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py))
+
+Das Modul überwacht Kosten und Quoten des BOKU-Backends non-blocking:
+1. **Cache Read & Stale Evaluation (`get_cost_cache_with_lazy_refresh`, `is_cost_cache_stale`):**
+   - Eingehende Requests lesen den bestehenden Cache via `read_cost_cache`.
+   - Ist der Cache älter als `COST_CACHE_TTL_SECONDS` (Default: 600s), wird ein asynchroner Refresh im Hintergrund angestoßen (`refresh_cost_cache_background`).
+2. **Asynchroner Live-Snapshot (`fetch_cost_snapshot`):**
+   - Ruft `GET /api/v1/cost/` am BOKU-Backend mit konfigurierten Credentials ab.
+   - Extrahiert `total_cost`, `total_clients` und `cost_entries` via `_extract_cost_summary`.
+3. **Atomares Schreiben (`write_cost_cache`):**
+   - Schreibt den neuen Cache atomar (`tempfile` + `os.replace` mit Windows-Retry und `_cost_lock`), um Race Conditions zwischen parallelen Requests zu verhindern.
+4. **Header-Generierung (`build_cost_headers`):**
+   - Injiziert `X-AcademicAI-Total-Cost`, `X-AcademicAI-Total-Clients`, `X-AcademicAI-Cost-Entries`, `X-AcademicAI-Cost-Updated-At` und `X-AcademicAI-Cost-Stale` in ausgehende Chat-Responses.
+
+---
+
+## 6. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
 
 Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab und sichern die Schnittstellenverträge vor Refactorings:
 
@@ -104,10 +120,12 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
 | `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |
 | `test_request_guards.py` | Validiert Inbound-Payloads (422/413), JSON-Größenlimits, Token-Bucket Rate-Limiting (429), Bucket-Sweep / TTL-Cleanup gegen unbegrenztes Speicherwachstum sowie Server-Re-Exports. |
+| `test_cost_monitoring_unit.py` | Unit-Tests für akademische Kostenüberwachung: Parsing (`_safe_float`, `_parse_iso_ts`), Payload-Extraktion (`_extract_cost_summary`), Stale-Prüfung (`is_cost_cache_stale`), Header-Generierung (`build_cost_headers`), atomare Cache-Roundtrips, Thread-Sicherheit und Server-Re-Exports. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
 
 ### Sicherheits-Baselines der Testumgebung
 - **Test-Discovery-Scope (`pytest.ini`):** Über `testpaths = tests` wird Pytest angewiesen, Tests ausschließlich im Verzeichnis `tests/` zu suchen. Dadurch werden Diagnose- und Connectivity-Skripte im Root-Verzeichnis (wie `test_models_connectivity.py`) von der Testausführung ausgeschlossen.
 - **Test-Port-Isolation (`tests/_local_env.py`):** Als Fallback für `ACADEMICAI_TEST_BASE_URL` ist Port `11436` (`http://127.0.0.1:11436`) vorkonfiguriert. Dies verhindert versehentliche Netzwerkaufrufe gegen eine parallel laufende produktive Instanz auf Port `11435`, falls Umgebungsvariablen nicht explizit gesetzt sind.
+
 
 
