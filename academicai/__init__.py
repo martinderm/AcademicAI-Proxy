@@ -95,6 +95,17 @@ from .runtime import (  # noqa: F401
     _check_backend_health,
     get_health_payload,
 )
+from .logging_config import (  # noqa: F401
+    configure_logging,
+    get_logger,
+    close_handlers,
+    log,
+    log_formatter,
+    info_handler,
+    error_handler,
+    console_handler,
+    root_logger,
+)
 
 __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
@@ -119,5 +130,9 @@ __all__ = [
     "cleanup_pid_file", "_cleanup_pid_file",
     "check_backend_health", "_check_backend_health",
     "get_health_payload",
+    "configure_logging", "get_logger", "close_handlers",
+    "log", "log_formatter", "info_handler", "error_handler",
+    "console_handler", "root_logger",
 ]
+
 

@@ -254,4 +254,39 @@ Das Modul [`academicai/runtime.py`](../../academicai/runtime.py) kapselt Lifecyc
 - **Server-Re-Exports:**
   - `server.py` re-exportiert `write_pid_file`, `_write_pid_file`, `cleanup_pid_file`, `_cleanup_pid_file`, `check_backend_health`, `_check_backend_health`, `get_health_payload`.
 
+---
+
+## 8. Logging-Infrastruktur & Handler-State ([`academicai/logging_config.py`](../../academicai/logging_config.py))
+
+Das Modul [`academicai/logging_config.py`](../../academicai/logging_config.py) kapselt die Initialisierung, Rotation und Entkopplung des Logging-Subsystems:
+
+### Handler- und Logger-Hierarchie
+- **Formatter (`log_formatter`):**
+  - Standardisiertes Zeit- und Level-Format: `%(asctime)s %(levelname)s %(message)s`.
+- **Info File Handler (`info_handler`):**
+  - `TimedRotatingFileHandler` auf Pfad `LOG_FILE_PATH` (Default: `server.log`, tägliche Rotation `when="D"`, `interval=1`, 30 Tage Retention, `encoding="utf-8"`).
+  - Minimum Level: `level` (Default: `logging.INFO`).
+- **Error File Handler (`error_handler`):**
+  - `TimedRotatingFileHandler` auf Pfad `ERR_FILE_PATH` (Default: `server.err.log`, tägliche Rotation `when="D"`, `interval=1`, 30 Tage Retention, `encoding="utf-8"`).
+  - Minimum Level: `logging.ERROR`.
+- **Console Handler (`console_handler`):**
+  - `logging.StreamHandler(sys.stdout)` für direkte Terminal- und Container-Ausgabe mit Level `level` (Default: `logging.INFO`).
+- **Root Logger (`root_logger`):**
+  - Befestigt `info_handler`, `error_handler` und `console_handler` am Root-Logger von Python.
+- **Proxy Logger (`log` / `get_logger`):**
+  - Dedizierter Named-Logger `academicai-proxy` für anwendungsspezifische Traces und strukturierte Warnungen/Fehler.
+
+### Uvicorn-Logger-Wiring
+- Konfiguriert die Uvicorn-Server-Logger (`uvicorn`, `uvicorn.error`, `uvicorn.access`):
+  - Bereinigt Standard-Handler (`ulog.handlers = []`) und leitet alle Uvicorn-Logs direkt an `info_handler`, `error_handler` und `console_handler`.
+  - Setzt `ulog.propagate = False`, um doppelte Protokollierungen über den Root-Logger zu unterbinden.
+
+### Windows-kompatible Bereinigung & dynamische Auflösung
+- **Ressourcenbereinigung (`close_handlers`):**
+  - Schließt aktive File-Handler und dereferenziert sie aus Root- und Uvicorn-Loggern, um gesperrte Dateihandles unter Windows bei Rekonfigurationen oder Test-Teardowns zu verhindern.
+- **Dynamische Attributauflösung (`_get_setting`):**
+  - Löst `LOG_FILE_PATH` und `ERR_FILE_PATH` dynamisch über Parameter, Attribute auf `server` oder `academicai.config` auf.
+- **Server-Rückwärtskompatibilität:**
+  - `server.py` re-exportiert `log`, `log_formatter`, `info_handler`, `error_handler`, `console_handler`, `root_logger`, `configure_logging`, `get_logger`, `close_handlers`, `log_file_path`, `err_file_path`.
+
 

@@ -124,7 +124,29 @@ Verwaltet den Server-Daemon-Lifecycle und die Überwachung der Upstream-Verbindu
 
 ---
 
-## 7. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
+## 7. Logging-Initialisierung & Uvicorn-Wiring ([`academicai/logging_config.py`](../../academicai/logging_config.py))
+
+Das Logging-Subsystem wird zentral über `configure_logging()` orchestriert:
+
+1. **Dynamische Pfadauflösung & Vorbereitung:**
+   - Ermittelt `LOG_FILE_PATH` und `ERR_FILE_PATH` über explizite Argumente, Attribute auf dem `server`-Modul oder `academicai.config`.
+   - Stellt sicher, dass Zielverzeichnisse für Log-Dateien existieren (`Path.mkdir(parents=True, exist_ok=True)`).
+2. **Sauberes Teardown existierender Handler (`close_handlers`):**
+   - Schließt offene File-Handler und dereferenziert sie vom Root-Logger sowie allen Uvicorn-Loggern, um gesperrte Dateihandles unter Windows zu vermeiden.
+3. **Handler-Initialisierung & Root-Logger-Konfiguration:**
+   - Instanziiert `TimedRotatingFileHandler` für Standard-Logs (täglich, 30 Tage Retention, UTF-8) und Error-Logs (täglich, 30 Tage Retention, Level `ERROR`, UTF-8).
+   - Instanziiert `StreamHandler(sys.stdout)` für Konsolen-Ausgaben.
+   - Formatiert alle Handler mit `%(asctime)s %(levelname)s %(message)s`.
+   - Registriert alle drei Handler am Python Root-Logger (`logging.getLogger()`).
+4. **Uvicorn-Logger-Wiring:**
+   - Konfiguriert die Logger `uvicorn`, `uvicorn.error` und `uvicorn.access`.
+   - Setzt `propagate = False` und weist ihnen die gemeinsamen rotierenden File- und Konsolen-Handler zu.
+5. **Server-Synchronisation:**
+   - Spiegelt die aktiven Handler- und Logger-Instanzen (`info_handler`, `error_handler`, `console_handler`, `root_logger`, `log`) auf das `server`-Modul für vollständige Rückwärtskompatibilität.
+
+---
+
+## 8. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
 
 Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab und sichern die Schnittstellenverträge vor Refactorings:
 
@@ -142,7 +164,9 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_request_guards.py` | Validiert Inbound-Payloads (422/413), JSON-Größenlimits, Token-Bucket Rate-Limiting (429), Bucket-Sweep / TTL-Cleanup gegen unbegrenztes Speicherwachstum sowie Server-Re-Exports. |
 | `test_cost_monitoring_unit.py` | Unit-Tests für akademische Kostenüberwachung: Parsing (`_safe_float`, `_parse_iso_ts`), Payload-Extraktion (`_extract_cost_summary`), Stale-Prüfung (`is_cost_cache_stale`), Header-Generierung (`build_cost_headers`), atomare Cache-Roundtrips, Thread-Sicherheit und Server-Re-Exports. |
 | `test_runtime_unit.py` | Unit-Tests für Laufzeit-Lifecycle: PID-File-Erstellung und -Bereinigung mit PID-Matching, Backend-Health-Checks (Erfolg, Timeout, Fehler, Deaktivierung), Health-Payload-Generierung (`ok`/`degraded`) und Server-Re-Exports. |
+| `test_logging_config_unit.py` | Unit-Tests für Logging-Konfiguration: Formatter, rotierende File-Handler (Info & Error), Konsolen-Handler, Uvicorn-Logger-Wiring (propagate=False), dynamische Pfadauflösung, Windows-kompatibles Schließen via close_handlers und Server-Re-Exports. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
+
 
 ### Sicherheits-Baselines der Testumgebung
 - **Test-Discovery-Scope (`pytest.ini`):** Über `testpaths = tests` wird Pytest angewiesen, Tests ausschließlich im Verzeichnis `tests/` zu suchen. Dadurch werden Diagnose- und Connectivity-Skripte im Root-Verzeichnis (wie `test_models_connectivity.py`) von der Testausführung ausgeschlossen.
