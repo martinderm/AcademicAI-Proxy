@@ -24,7 +24,7 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 AcademicAI does not provide native OpenAI function-calling/tool-calling in the same way OpenAI-compatible clients expect.
 This proxy emulates the tool flow so orchestrators (e.g. OpenClaw) can still run tools reliably.
 
-### Important: limits of tool-call emulation (plain language)
+### Limits of tool-call emulation (plain language)
 
 Tool-calling is **simulated**, not native. That means the model is guided via prompt + JSON parsing,
 not by a backend-level function-calling engine.
@@ -36,6 +36,30 @@ In practice this works well, but there are limits:
 - reliability is generally lower than true native tool-calling APIs
 
 So: good for practical use, but not mathematically deterministic.
+
+### Efficiency and latency mechanics (why it is fast)
+
+Users often observe that tool calling through this proxy feels surprisingly fast. This is driven by three specific architectural choices:
+
+1. **Azure OpenAI KV-Prefix Caching:**  
+   The proxy merges system instructions and tool definitions at the very beginning of the first user message. Because the BOKU backend runs on Azure OpenAI, stable prefix tokens (system context + tool signatures) trigger automatic KV-cache hits. This reduces Time-To-First-Token (TTFT) from seconds to milliseconds on repeated turns.
+2. **Single-Pass Minimal Output (JSON Mode):**  
+   Instead of a two-pass router or conversational tool descriptions, the backend is invoked in `response_format: {type: "json_object"}`. Modern models produce minimal JSON without pleasantries (`{"action": "tool_call", ...}`), emitting only 25–40 tokens per call.
+3. **Zero Heavy Framework Overhead:**  
+   Direct asynchronous HTTP transport via `httpx` and Python standard library parsing eliminates the latency overhead of heavy abstraction layers.
+
+### Potential remaining problems and edge cases
+
+While reliable for everyday agent tasks, emulating function calling over a text-only backend comes with structural trade-offs:
+
+1. **Schema Compression Trade-offs:**  
+   To prevent context window explosion when dozens of tools are registered, tool schemas are compressed into compact signatures (`_compact_tool_def`). Highly complex, deeply nested JSON schemas or tools requiring large nested objects may suffer from reduced parameter precision compared to native OpenAI function calling engines.
+2. **Lack of Hard Enforced `tool_choice: "required"`:**  
+   Because the JSON schema must provide an escape hatch (`{"action": "respond", "content": "..."}`) for direct answers, the proxy cannot hard-enforce tool calls at the inference engine level. A model may occasionally choose to answer in prose even if a client desired an explicit tool call.
+3. **Multi-Turn Role Flattening (`role: "tool"`):**  
+   The underlying backend only accepts `user` and `assistant` roles. Tool results are flattened into user turns with `[Tool result (id: ...)]` prefixes. In deep multi-step loops (5+ sequential tool executions), this conversational history can sometimes cause attention drift or prompt looping, which the post-tool guard mitigates.
+4. **Probabilistic vs. Deterministic Parsing:**  
+   Unlike native APIs where tool arguments are constrained by grammar-based token samplers, the model generates raw JSON text. While the proxy includes a multi-tier fallback parser (direct parse → markdown codeblock extraction → bracket-depth counter), malformed JSON from weaker models can lead to retry loops or fallback to text.
 
 ## Endpoints
 
