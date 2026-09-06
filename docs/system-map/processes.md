@@ -16,12 +16,12 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
  1. Authentifizierung & Insecure-Key-Check (Bearer Token via API_KEY aus academicai/config.py)
        │
        ▼
- 2. Payload-Validierung & Schutzgrenzen (_validate_chat_request_body & Rate-Limiting):
-    ├─ JSON-Größe vs. ACADEMICAI_MAX_REQUEST_JSON_CHARS (413 bei Übergröße)
-    ├─ Nachrichtenanzahl & Textlänge vs. ACADEMICAI_MAX_MESSAGES / MAX_MESSAGE_TEXT_CHARS (413)
+ 2. Payload-Validierung & Schutzgrenzen (academicai/request_guards.py & Rate-Limiting):
+    ├─ JSON-Größe vs. ACADEMICAI_MAX_REQUEST_JSON_CHARS via validate_request_json_size (413 bei Übergröße)
+    ├─ Nachrichtenanzahl & Textlänge vs. ACADEMICAI_MAX_MESSAGES / MAX_MESSAGE_TEXT_CHARS via validate_chat_request_body (413)
     ├─ Tools-Anzahl & Schema-Größe vs. ACADEMICAI_MAX_TOOLS / MAX_TOOL_SCHEMA_CHARS (413)
     ├─ Strukturiertes Logging in server.log bei jeder Abweisung (413/422/400)
-    └─ Token-Bucket Rate-Limiting vs. RATE_LIMIT_PER_MINUTE / RATE_LIMIT_WINDOW_SECONDS (429)
+    └─ Token-Bucket Rate-Limiting mit periodischem TTL-Sweep (academicai/request_guards.py) vs. RATE_LIMIT_PER_MINUTE / RATE_LIMIT_WINDOW_SECONDS (429)
        │
        ▼
  3. Message-Normalisierung & Heuristiken:
@@ -102,6 +102,7 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
 | `test_skill_snippets.py` | Dynamisches Self-Learning und Topic-Matching für Tool-Empfehlungen. |
 | `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |
+| `test_request_guards.py` | Validiert Inbound-Payloads (422/413), JSON-Größenlimits, Token-Bucket Rate-Limiting (429), Bucket-Sweep / TTL-Cleanup gegen unbegrenztes Speicherwachstum sowie Server-Re-Exports. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
 
 ### Sicherheits-Baselines der Testumgebung

@@ -134,3 +134,31 @@ Das Modul [`academicai/config.py`](../../academicai/config.py) ist die zentrale 
 | `RETRY_MAX` | `ACADEMICAI_RETRY_MAX` | `int` | `2` | Maximale Retry-Wiederholungen bei Backend-Netzwerkfehlern |
 | `RETRY_BASE_MS` | `ACADEMICAI_RETRY_BASE_MS` | `int` | `300` | Basis-Wartezeit für exponentielles Backoff bei Retries |
 
+---
+
+## 5. Request-Guards & Rate-Limiting-Zustand ([`academicai/request_guards.py`](../../academicai/request_guards.py))
+
+Das Modul [`academicai/request_guards.py`](../../academicai/request_guards.py) kapselt die Inbound-Validierung von Chat-Completion-Payloads sowie das In-Memory Token-Bucket Rate-Limiting.
+
+### Inbound-Validierung & Schutzgrenzen (413 / 422)
+- **JSON-Serialisierbarkeit & Request-Größe (`validate_request_json_size`):**
+  - Prüft, ob der Payload ein gültiges JSON-Objekt darstellt (422 bei Serialisierungsfehlern).
+  - Vergleicht die aggregierte Zeichenlänge mit `MAX_REQUEST_JSON_CHARS` (413 bei Überschreitung).
+- **Struktur- & Schema-Validierung (`validate_chat_request_body`):**
+  - **422 Unprocessable Entity:** Nicht-Dict-Payloads, fehlendes oder leeres `model`, `model` > 200 Zeichen, fehlende/leere `messages`-Liste, nicht-objektbasierte Messages, fehlende/leere Message-Rollen, nicht-listenbasierte Tools/Functions, ungültige Tool-Objekte oder nicht serialisierbare Tools.
+  - **413 Payload Too Large:** Nachrichtenanzahl > `MAX_MESSAGES`, extrahierter Plain-Text pro Nachricht > `MAX_MESSAGE_TEXT_CHARS`, Tool-Anzahl > `MAX_TOOLS`, serialisiertes Tool-Schema > `MAX_TOOL_SCHEMA_CHARS`.
+
+### In-Memory Rate Limiting & Bucket Sweep TTL
+- **Zustandsspeicher (`_rate_limit_buckets`):**
+  - Dictionary `dict[str, list[float]]`, geschützt durch `_rate_limit_lock`.
+  - Bucket-Schlüsselformat: `f"{client_host}:{token[:8]}"` via `_rate_limit_bucket`.
+  - Hält Zeitstempel (`float`) erfolgreicher Anfragen innerhalb des aktiven Zeitfensters (`RATE_LIMIT_WINDOW_SECONDS`, Default: 60s).
+- **Bucket Sweep / TTL Cleanup (`prune_rate_limit_buckets`):**
+  - Zur Verhinderung unbegrenzten Speicherwachstums (Unbounded Memory Growth) bei vielen wechselnden Client-IPs/Tokens:
+    1. **Automatischer periodischer Sweep:** In `_enforce_chat_rate_limit` wird nach Ablauf des Sweep-Intervalls (Default: 60s) ein automatischer Inline-Sweep ausgeführt.
+    2. **On-Demand Pruning:** `prune_rate_limit_buckets(now=None, window_seconds=None)` kann jederzeit explizit aufgerufen werden.
+    3. **Bereinigungsregel:** Buckets ohne aktive Zeitstempel (`all ts < now - window_seconds`) sowie leere Buckets werden vollständig gelöscht (`del _rate_limit_buckets[key]`). Verbleibende Buckets werden auf aktive Zeitstempel gekürzt.
+- **Rückwärtskompatibilität:**
+  - `server.py` re-exportiert `_validate_chat_request_body`, `_enforce_chat_rate_limit`, `_rate_limit_bucket`, `_rate_limit_buckets` und `_rate_limit_lock`.
+  - Die interne Auflösung (`_get_limit`) prüft dynamisch Attribute auf dem `server`-Modul, sodass bestehende `monkeypatch.setattr(server, ...)`-Tests unverändert funktionieren.
+
