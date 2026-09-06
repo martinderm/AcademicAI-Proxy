@@ -27,7 +27,6 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
  3. Message-Normalisierung & Heuristiken:
     ├─ _extract_text_content (Plain-Text-Extraktion)
     ├─ _is_human_readable_target (Human Channel vs. Cron)
-    ├─ _inject_skill_snippet_context (Skill-Snippets injecten)
     └─ _apply_post_tool_guard (Fehler-Schutz nach Tool-Result)
        │
        ▼
@@ -39,10 +38,8 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
     └─ Übertragung mit X-Client-ID / X-Client-Secret & Azure Prefix Cache
        │
        ▼
- 6. Parsing & Safety-Filter:
-    ├─ parse_tool_calls (Extraktion von ```json ... ``` Calls)
-    ├─ _enforce_write_before_mail_delete (Schutz vor unberechtigtem Mail-Löschen)
-    └─ _extract_and_learn_tool_usage (Aktualisiert skill_snippets.json)
+ 6. Parsing:
+    └─ parse_tool_calls (Extraktion von ```json ... ``` Calls)
        │
        ▼
  7. Response-Formatierung:
@@ -98,9 +95,8 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_multi_step_tool_emulation.py` | Mehrstufige Handoffs: Tool Call → Result → Next Call → Final Answer. |
 | `test_post_tool_guard.py` | Verhindert Endlosschleifen nach Tool-Fehlern oder phantomhaften Folgeaufrufen. |
 | `test_humanization_flow.py` | Erkennung menschlicher Chat-Kanäle (WhatsApp/Telegram) vs. maschineller JSON-Fallback. |
-| `test_hardening_security_runtime.py` | Schutz gegen Klartext-Leakage, Insecure Key Detection, Mail-Destruction Guard. |
+| `test_hardening_security_runtime.py` | Schutz gegen Klartext-Leakage, Insecure Key Detection, Request-Guards & Payload-Limits. |
 | `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
-| `test_skill_snippets.py` | Dynamisches Self-Learning und Topic-Matching für Tool-Empfehlungen. |
 | `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |
 | `test_request_guards.py` | Validiert Inbound-Payloads (422/413), JSON-Größenlimits, Token-Bucket Rate-Limiting (429), Bucket-Sweep / TTL-Cleanup gegen unbegrenztes Speicherwachstum sowie Server-Re-Exports. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |

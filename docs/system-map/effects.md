@@ -36,7 +36,6 @@
 | `server.log` | Jeder HTTP-Request | Tägliche Log-Rotation; automatische Bereinigung von Logs älter als 30 Tage. |
 | `server.pid` | Start / Stop | Speichert die PID des laufenden Uvicorn-Prozesses. |
 | `last_backend_request.json` | Bei `ACADEMICAI_DEBUG_DUMPS=true` | Überschreibt bei jedem Request den Rohpayload zum Debugging. |
-| `skill_snippets.json` | Nach erfolgreichem Tool-Aufruf | Dynamisches Self-Learning: Ergänzt Heuristik-Tipps für erkannte Tools. |
 
 ---
 
@@ -46,9 +45,7 @@
    Alle Log-Ausgaben filtern Passwörter, API-Keys (`sk-...`), Client-Secrets und Authorization-Header heraus (`[REDACTED]`).
 2. **Fast-Fail bei unsicheren Keys:**  
    Wenn `ACADEMICAI_PROXY_API_KEY` fehlt, kürzer als 16 Zeichen ist oder bekannte Standardwerte (`changeme`, `replace-with-strong-key`) enthält, verweigert der Server den Start mit Exit-Code 1.
-3. **Mail-Destruction Guard (`_enforce_write_before_mail_delete`):**  
-   Verhindert das versehentliche Löschen/Verschieben von E-Mails via Himalaya CLI (`exec`), falls die Batch-Operation nicht vorher explizit einen Schreibvorgang (`write`/`edit`) enthielt.
-4. **Request- & Payload-Limits (413 / 422 Guardrails):**  
+3. **Request- & Payload-Limits (413 / 422 Guardrails):**  
    Schützt Proxy und Backend vor Memory Exhaustion und unkontrollierten Payloads:
    - Tool-Obergrenze: `ACADEMICAI_MAX_TOOLS` (Default: 256)
    - Tool-Schema-Größe: `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` (Default: 100.000 Chars)

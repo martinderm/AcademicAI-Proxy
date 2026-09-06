@@ -78,16 +78,6 @@ Wird von [`academicai/tool_emulation.py`](../../academicai/tool_emulation.py) au
 - `Usage`: `prompt_tokens: int`, `completion_tokens: int`, `total_tokens: int`
 - `CompletionResponse`: `id: str`, `object: str`, `created: int`, `model: str`, `choices: list[Choice]`, `usage: Usage`
 
-### `SkillSnippet` (Zustandsobjekt für Self-Learning)
-In `skill_snippets.json` persistierte Heuristik-Tipps:
-```json
-{
-  "id": "himalaya-envelope-list",
-  "topics": ["mail", "envelope", "himalaya"],
-  "snippet": "Use envelope list -s 50 to search mailboxes efficiently."
-}
-```
-
 ---
 
 ## 4. Konfiguration & Runtime State ([`academicai/config.py`](../../academicai/config.py))

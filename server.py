@@ -110,212 +110,6 @@ def _apply_post_tool_guard(messages: list, has_tools: bool) -> list:
     return [{"role": "system", "content": guard_text}] + messages
 
 
-def _score_topic_match(user_text: str, topics: list) -> int:
-    txt = (user_text or "").lower()
-    score = 0
-    for t in (topics or []):
-        tok = str(t).strip().lower()
-        if tok and tok in txt:
-            score += 1
-    return score
-
-
-def _load_skill_snippets() -> list:
-    try:
-        p = Path(SKILL_SNIPPETS_FILE)
-        if not p.exists():
-            return []
-        data = json.loads(p.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception as e:
-        log.warning(f"skill snippets load failed: {e}")
-        return []
-
-
-def _inject_skill_snippet_context(messages: list, user_text: str) -> list:
-    """Injiziert passende Skill-Snippets als kurze System-Message."""
-    if not ENABLE_SKILL_SNIPPETS:
-        return messages
-
-    snippets = _load_skill_snippets()
-    if not snippets:
-        return messages
-
-    scored = []
-    for s in snippets:
-        score = _score_topic_match(user_text, s.get("topics", []))
-        if score > 0 and s.get("snippet"):
-            scored.append((score, s))
-
-    if not scored:
-        return messages
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    selected = [s for _, s in scored[: max(1, SKILL_SNIPPETS_MAX)]]
-    selected_ids = [str(s.get("id", "snippet")) for s in selected]
-    log.info(f"skill snippet injection: selected_ids={selected_ids}")
-
-    parts = [
-        "SKILL CONTEXT (retrieved): Use this operational guidance when deciding tool calls."
-    ]
-    for s in selected:
-        sid = s.get("id", "snippet")
-        parts.append(f"[{sid}] {s.get('snippet', '').strip()}")
-
-    msg = {"role": "system", "content": "\n\n".join(parts)}
-    return [msg] + messages
-
-
-def _save_skill_snippets(snippets: list) -> None:
-    p = Path(SKILL_SNIPPETS_FILE)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(snippets, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-
-def _extract_learning_topics(user_text: str, limit: int) -> list[str]:
-    """Leitet einfache Themen-Keywords aus User-Text ab (Variante 1, ohne Embeddings)."""
-    if not user_text:
-        return []
-
-    stopwords = {
-        "aber", "alle", "alles", "auch", "bitte", "dann", "dass", "deine", "deinen", "deiner",
-        "dem", "den", "der", "des", "die", "ein", "eine", "einer", "eines", "es", "für", "gibt",
-        "haben", "hier", "ich", "ihr", "ihre", "ihren", "ist", "kann", "können", "mal", "mit",
-        "nach", "noch", "oder", "schon", "sehr", "sind", "so", "und", "uns", "von", "was", "wie",
-        "wir", "wird", "wurde", "you", "your", "from", "that", "this", "have", "just", "tool",
-    }
-
-    words = re.findall(r"[a-zA-Z0-9äöüÄÖÜß_-]+", user_text.lower())
-    ranked = []
-    seen = set()
-    for w in words:
-        if len(w) < max(2, AUTO_SKILL_MIN_TOPIC_LEN):
-            continue
-        if w in stopwords:
-            continue
-        if w in seen:
-            continue
-        seen.add(w)
-        ranked.append(w)
-        if len(ranked) >= max(1, limit):
-            break
-    return ranked
-
-
-def _upsert_auto_skill_snippet(snippets: list, tool_name: str, topics: list[str]) -> tuple[list, bool]:
-    """Upsert für auto-generierte Snippets; erweitert Topics und Hit-Counter."""
-    if not tool_name:
-        return snippets, False
-
-    sid = f"auto:{tool_name}"
-    changed = False
-
-    for s in snippets:
-        if s.get("id") == sid:
-            existing_topics = [str(t).lower() for t in (s.get("topics") or []) if str(t).strip()]
-            merged = list(existing_topics)
-            for t in topics:
-                tl = str(t).lower().strip()
-                if tl and tl not in merged:
-                    merged.append(tl)
-                    changed = True
-            s["topics"] = merged
-            s["source"] = "auto"
-            s["hits"] = int(s.get("hits", 0)) + 1
-            s["last_updated"] = int(time.time())
-            changed = True
-            return snippets, changed
-
-    new_entry = {
-        "id": sid,
-        "source": "auto",
-        "hits": 1,
-        "last_updated": int(time.time()),
-        "topics": [str(t).lower().strip() for t in topics if str(t).strip()],
-        "snippet": (
-            f"If this intent appears, prefer tool `{tool_name}` first. "
-            "If tool output is insufficient, run a minimal follow-up tool call and then return a concise final answer."
-        ),
-    }
-    snippets.append(new_entry)
-    return snippets, True
-
-
-def _learn_skill_snippets_from_tool_calls(user_text: str, tool_calls: list[dict]) -> None:
-    """Self-learning (Variante 1): keyword-basiertes Upsert in skill_snippets.json."""
-    if not ENABLE_AUTO_SKILL_LEARNING:
-        return
-    if not tool_calls:
-        return
-
-    topics = _extract_learning_topics(user_text, limit=AUTO_SKILL_TOPICS_PER_CALL)
-    if not topics:
-        return
-
-    tool_names = []
-    for c in tool_calls:
-        name = str((c or {}).get("name", "")).strip()
-        if name and name not in tool_names:
-            tool_names.append(name)
-
-    if not tool_names:
-        return
-
-    try:
-        snippets = _load_skill_snippets()
-        changed_any = False
-        for name in tool_names:
-            snippets, changed = _upsert_auto_skill_snippet(snippets, name, topics)
-            changed_any = changed_any or changed
-
-        if changed_any:
-            _save_skill_snippets(snippets)
-            log.info(f"skill snippet self-learning: updated tools={tool_names} topics={topics}")
-    except Exception as e:
-        log.warning(f"skill snippet self-learning failed: {e}")
-
-
-def _is_mail_delete_exec_call(call: dict) -> bool:
-    """Erkennt exec-Calls, die Himalaya-Mails löschen/verschieben."""
-    if not isinstance(call, dict) or call.get("name") != "exec":
-        return False
-    args = call.get("arguments") or {}
-    cmd = str(args.get("command", "")).lower()
-    # Sicherheitsrelevant: alle delete/move Varianten (inkl. Trash/Cabinet/andere Ordner)
-    return ("message delete" in cmd) or ("message move" in cmd)
-
-
-def _enforce_write_before_mail_delete(tool_calls: list[dict]) -> tuple[list[dict], bool]:
-    """
-    Safety-Guard für Batch-Tool-Calls:
-    Mail-Delete/Move (in beliebige Ordner, inkl. Trash/Cabinet) darf in derselben Batch
-    nur passieren, wenn vorher ein write/edit Call enthalten ist.
-
-    Returns: (filtered_calls, blocked_any)
-    """
-    if not tool_calls:
-        return [], False
-
-    out = []
-    blocked_any = False
-    has_write_before = False
-    for c in tool_calls:
-        name = (c or {}).get("name")
-        if name in ("write", "edit"):
-            has_write_before = True
-            out.append(c)
-            continue
-
-        if _is_mail_delete_exec_call(c) and not has_write_before:
-            blocked_any = True
-            log.warning("blocked unsafe mail delete/move call without prior write/edit in same batch")
-            continue
-
-        out.append(c)
-
-    return out, blocked_any
-
-
 def _is_human_readable_target(messages: list) -> bool:
     """
     Heuristik: Nur bei menschlichen Zielkanälen JSON->Human-Text-Fallback aktivieren.
@@ -404,12 +198,6 @@ from academicai.config import (
     ENABLE_HUMANIZATION_PASS,
     HUMANIZATION_MODEL,
     HUMANIZATION_TEMPERATURE,
-    ENABLE_SKILL_SNIPPETS,
-    SKILL_SNIPPETS_FILE,
-    SKILL_SNIPPETS_MAX,
-    ENABLE_AUTO_SKILL_LEARNING,
-    AUTO_SKILL_TOPICS_PER_CALL,
-    AUTO_SKILL_MIN_TOPIC_LEN,
     STREAM_CHUNK_DELAY_MS,
     DEBUG_DUMPS,
     ALLOWED_MODELS,
@@ -809,10 +597,6 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
         log.warning("tool_choice provided without tools; ignoring tool emulation for this request")
     log.info(f"incoming: model={model} stream={body.get('stream')} roles={[m.get('role') for m in messages]} tools={len(tools)} has_tools={has_tools}")
 
-    # Optional: passende Skill-Snippets injizieren (z.B. mailbox/email -> Himalaya wrapper)
-    if has_tools:
-        messages = _inject_skill_snippet_context(messages, user_text=original_user_query)
-
     # Bei Follow-up nach Tool-Result finale Antwort stärker priorisieren
     messages = _apply_post_tool_guard(messages, has_tools=has_tools)
 
@@ -884,15 +668,12 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
 
     # JSON-Mode Response verarbeiten (nur wenn Tools im Request waren)
     tool_calls_data = []
-    blocked_unsafe_delete = False
     human_target = human_target_hint
     if has_tools:
         tool_calls_data = parse_tool_calls(content)
         if tool_calls_data:
-            tool_calls_data, blocked_unsafe_delete = _enforce_write_before_mail_delete(tool_calls_data)
             names = [c.get("name", "?") for c in tool_calls_data]
             log.info(f"tool_call(s) detected: count={len(tool_calls_data)} names={names}")
-            _learn_skill_snippets_from_tool_calls(original_user_query, tool_calls_data)
         else:
             # Kein Tool-Call — entweder {"action":"respond",...} oder Fallback
             extracted = extract_respond_content(content)
@@ -925,14 +706,6 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
                             log.warning(f"json_mode parse failed, using raw content: {content[:120]}")
                 else:
                     log.warning("json_mode: arbitrary JSON on non-human target, keeping raw content")
-
-    # Klarer User-Text wenn ein unsicherer Delete-Call geblockt wurde
-    if has_tools and blocked_unsafe_delete and not tool_calls_data:
-        content = (
-            "Blocked unsafe mail action: message delete/move requires a prior write/edit "
-            "in the same tool-call batch."
-        )
-        finish_reason = "stop"
 
     # Optionaler zweiter Pass: natürliche Endantwort für Human-Channels
     if (

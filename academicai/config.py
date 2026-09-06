@@ -138,14 +138,6 @@ class Settings:
     HUMANIZATION_MODEL: str = ""
     HUMANIZATION_TEMPERATURE: float = 0.7
 
-    # Skill Snippets
-    ENABLE_SKILL_SNIPPETS: bool = False
-    SKILL_SNIPPETS_FILE: str = "data/skill_snippets.json"
-    SKILL_SNIPPETS_MAX: int = 1
-    ENABLE_AUTO_SKILL_LEARNING: bool = False
-    AUTO_SKILL_TOPICS_PER_CALL: int = 6
-    AUTO_SKILL_MIN_TOPIC_LEN: int = 4
-
     # Streaming & Debug
     STREAM_CHUNK_DELAY_MS: int = 0
     DEBUG_DUMPS: bool = False
@@ -166,7 +158,6 @@ class Settings:
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         e = os.environ if env is None else env
 
-        snippets_default = str(Path("data") / "skill_snippets.json")
         cost_cache_default = str(Path("data") / "cost_cache.json")
         pid_default = Path("server.pid")
 
@@ -202,13 +193,6 @@ class Settings:
             ENABLE_HUMANIZATION_PASS=_parse_bool(e.get("ACADEMICAI_ENABLE_HUMANIZATION_PASS"), False),
             HUMANIZATION_MODEL=str(e.get("ACADEMICAI_HUMANIZATION_MODEL", "")).strip(),
             HUMANIZATION_TEMPERATURE=_parse_float(e.get("ACADEMICAI_HUMANIZATION_TEMPERATURE"), 0.7),
-
-            ENABLE_SKILL_SNIPPETS=_parse_bool(e.get("ACADEMICAI_ENABLE_SKILL_SNIPPETS"), False),
-            SKILL_SNIPPETS_FILE=str(e.get("ACADEMICAI_SKILL_SNIPPETS_FILE", snippets_default)),
-            SKILL_SNIPPETS_MAX=_parse_int(e.get("ACADEMICAI_SKILL_SNIPPETS_MAX"), 1),
-            ENABLE_AUTO_SKILL_LEARNING=_parse_bool(e.get("ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING"), False),
-            AUTO_SKILL_TOPICS_PER_CALL=_parse_int(e.get("ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL"), 6),
-            AUTO_SKILL_MIN_TOPIC_LEN=_parse_int(e.get("ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN"), 4),
 
             STREAM_CHUNK_DELAY_MS=_parse_int(e.get("ACADEMICAI_STREAM_CHUNK_DELAY_MS"), 0, min_val=0),
             DEBUG_DUMPS=_parse_bool(e.get("ACADEMICAI_DEBUG_DUMPS"), False),
@@ -251,8 +235,6 @@ def reload_settings(env: Mapping[str, str] | None = None) -> Settings:
     global DEFAULT_CHAT_TEMPERATURE, DEFAULT_TOOL_TEMPERATURE, DEFAULT_CHAT_VERBOSITY
     global DEFAULT_TOOL_VERBOSITY, DEFAULT_TOOL_REASONING_EFFORT
     global ENABLE_HUMANIZATION_PASS, HUMANIZATION_MODEL, HUMANIZATION_TEMPERATURE
-    global ENABLE_SKILL_SNIPPETS, SKILL_SNIPPETS_FILE, SKILL_SNIPPETS_MAX
-    global ENABLE_AUTO_SKILL_LEARNING, AUTO_SKILL_TOPICS_PER_CALL, AUTO_SKILL_MIN_TOPIC_LEN
     global STREAM_CHUNK_DELAY_MS, DEBUG_DUMPS, ALLOWED_MODELS
     global PID_FILE, LOG_FILE_PATH, ERR_FILE_PATH, RETRY_MAX, MAX_RETRIES, RETRY_BASE_MS
 
@@ -304,12 +286,13 @@ ENABLE_HUMANIZATION_PASS = _default_settings.ENABLE_HUMANIZATION_PASS
 HUMANIZATION_MODEL = _default_settings.HUMANIZATION_MODEL
 HUMANIZATION_TEMPERATURE = _default_settings.HUMANIZATION_TEMPERATURE
 
-ENABLE_SKILL_SNIPPETS = _default_settings.ENABLE_SKILL_SNIPPETS
-SKILL_SNIPPETS_FILE = _default_settings.SKILL_SNIPPETS_FILE
-SKILL_SNIPPETS_MAX = _default_settings.SKILL_SNIPPETS_MAX
-ENABLE_AUTO_SKILL_LEARNING = _default_settings.ENABLE_AUTO_SKILL_LEARNING
-AUTO_SKILL_TOPICS_PER_CALL = _default_settings.AUTO_SKILL_TOPICS_PER_CALL
-AUTO_SKILL_MIN_TOPIC_LEN = _default_settings.AUTO_SKILL_MIN_TOPIC_LEN
+# Deprecated / inert legacy variables (retained as inert fallbacks)
+ENABLE_SKILL_SNIPPETS: bool = False
+SKILL_SNIPPETS_FILE: str = ""
+SKILL_SNIPPETS_MAX: int = 0
+ENABLE_AUTO_SKILL_LEARNING: bool = False
+AUTO_SKILL_TOPICS_PER_CALL: int = 0
+AUTO_SKILL_MIN_TOPIC_LEN: int = 0
 
 STREAM_CHUNK_DELAY_MS = _default_settings.STREAM_CHUNK_DELAY_MS
 DEBUG_DUMPS = _default_settings.DEBUG_DUMPS

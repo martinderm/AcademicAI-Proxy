@@ -71,13 +71,6 @@ If multiple tool calls are needed in one turn:
 
 If you can answer directly from your knowledge:
 {{"action": "respond", "content": "<your answer>"}}
-
-IMPORTANT — exec tool on Windows/PowerShell:
-- Commands are already executed inside PowerShell. Do NOT wrap them in \
-`powershell -Command "..."` with double quotes (causes $variable expansion).
-- Write PowerShell commands directly, e.g.: `Get-Content file.txt`
-- If you must use $variables inside a nested call, use single-quoted strings \
-or backtick-escape: `$var` → `` `$var ``.
 """
 
 
