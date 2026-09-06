@@ -370,87 +370,56 @@ def _is_human_readable_target(messages: list) -> bool:
     return False
 
 # --- Config ---
-PORT = int(os.environ.get("ACADEMICAI_PROXY_PORT", 11435))
-API_KEY = (os.environ.get("ACADEMICAI_PROXY_API_KEY") or "").strip()
-DEBUG_DUMPS = os.environ.get("ACADEMICAI_DEBUG_DUMPS", "false").lower() in ("1", "true", "yes", "on")
-
-_INSECURE_PROXY_KEYS = {
-    "academicai-proxy",
-    "changeme",
-    "replace-with-strong-key",
-}
-
-
-def _validate_proxy_api_key(api_key: str) -> str:
-    key = (api_key or "").strip()
-    if not key:
-        raise RuntimeError("ACADEMICAI_PROXY_API_KEY is required and must not be empty.")
-    if key.lower() in _INSECURE_PROXY_KEYS:
-        raise RuntimeError("ACADEMICAI_PROXY_API_KEY uses an insecure placeholder value.")
-    if len(key) < 16:
-        raise RuntimeError("ACADEMICAI_PROXY_API_KEY is too short; use at least 16 characters.")
-    return key
-
-
-API_KEY = _validate_proxy_api_key(API_KEY)
-
-ALLOWED_MODELS = [
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-5",
-    "gpt-5-mini",
-]
-
-# Proxy-Defaults (nur wenn Client keinen Wert setzt)
-DEFAULT_CHAT_TEMPERATURE = float(os.environ.get("ACADEMICAI_DEFAULT_CHAT_TEMPERATURE", "0.6"))
-DEFAULT_TOOL_TEMPERATURE = float(os.environ.get("ACADEMICAI_DEFAULT_TOOL_TEMPERATURE", "0.1"))
-DEFAULT_CHAT_VERBOSITY = os.environ.get("ACADEMICAI_DEFAULT_CHAT_VERBOSITY", "medium")
-DEFAULT_TOOL_VERBOSITY = os.environ.get("ACADEMICAI_DEFAULT_TOOL_VERBOSITY", "low")
-DEFAULT_TOOL_REASONING_EFFORT = os.environ.get("ACADEMICAI_DEFAULT_TOOL_REASONING_EFFORT", "low")
-
-# Optionaler zweiter Pass: strukturiertes Ergebnis -> natürlichsprachliche Endantwort
-ENABLE_HUMANIZATION_PASS = os.environ.get("ACADEMICAI_ENABLE_HUMANIZATION_PASS", "false").lower() in ("1", "true", "yes", "on")
-HUMANIZATION_MODEL = os.environ.get("ACADEMICAI_HUMANIZATION_MODEL", "").strip()
-HUMANIZATION_TEMPERATURE = float(os.environ.get("ACADEMICAI_HUMANIZATION_TEMPERATURE", "0.2"))
-
-# Optional: skill snippet retrieval/injection to improve tool-call reliability
-ENABLE_SKILL_SNIPPETS = os.environ.get("ACADEMICAI_ENABLE_SKILL_SNIPPETS", "false").lower() in ("1", "true", "yes", "on")
-# NOTE: skill snippets are installation-specific runtime data (esp. with auto-learning enabled)
-# Default location is under ./data/ (relative to the working directory).
-SKILL_SNIPPETS_FILE = os.environ.get(
-    "ACADEMICAI_SKILL_SNIPPETS_FILE",
-    str(Path("data") / "skill_snippets.json"),
+from academicai.config import (
+    INSECURE_PROXY_KEYS,
+    _INSECURE_PROXY_KEYS,
+    _validate_proxy_api_key,
+    validate_config,
+    get_settings,
+    Settings,
+    PORT,
+    API_KEY,
+    BASE_URL,
+    HEALTH_CHECK_BACKEND,
+    HEALTH_CHECK_TIMEOUT_SECONDS,
+    ENABLE_COST_MONITORING,
+    COST_CACHE_FILE,
+    COST_CACHE_TTL_SECONDS,
+    COST_REFRESH_TIMEOUT_SECONDS,
+    MAX_MESSAGES,
+    MAX_TOOLS,
+    MAX_MESSAGE_TEXT_CHARS,
+    MAX_TOOL_SCHEMA_CHARS,
+    MAX_REQUEST_JSON_CHARS,
+    RATE_LIMIT_PER_MINUTE,
+    RATE_LIMIT_WINDOW_SECONDS,
+    DEFAULT_CHAT_TEMPERATURE,
+    DEFAULT_TOOL_TEMPERATURE,
+    DEFAULT_CHAT_VERBOSITY,
+    DEFAULT_TOOL_VERBOSITY,
+    DEFAULT_TOOL_REASONING_EFFORT,
+    ENABLE_HUMANIZATION_PASS,
+    HUMANIZATION_MODEL,
+    HUMANIZATION_TEMPERATURE,
+    ENABLE_SKILL_SNIPPETS,
+    SKILL_SNIPPETS_FILE,
+    SKILL_SNIPPETS_MAX,
+    ENABLE_AUTO_SKILL_LEARNING,
+    AUTO_SKILL_TOPICS_PER_CALL,
+    AUTO_SKILL_MIN_TOPIC_LEN,
+    STREAM_CHUNK_DELAY_MS,
+    DEBUG_DUMPS,
+    ALLOWED_MODELS,
+    PID_FILE,
+    LOG_FILE_PATH,
+    ERR_FILE_PATH,
+    RETRY_MAX,
+    RETRY_BASE_MS,
 )
-SKILL_SNIPPETS_MAX = int(os.environ.get("ACADEMICAI_SKILL_SNIPPETS_MAX", "1"))
-
-# Optional: self-learning updates for skill_snippets.json (keyword-basiert, ohne Vektor-Index)
-ENABLE_AUTO_SKILL_LEARNING = os.environ.get("ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING", "false").lower() in ("1", "true", "yes", "on")
-AUTO_SKILL_TOPICS_PER_CALL = int(os.environ.get("ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL", "6"))
-AUTO_SKILL_MIN_TOPIC_LEN = int(os.environ.get("ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN", "4"))
-
-# Optional: Cost API cache (doku-konform via /api/v1/cost)
-# Standardmäßig deaktiviert; aktiviert nur mit ACADEMICAI_ENABLE_COST_MONITORING=true
-ENABLE_COST_MONITORING = os.environ.get("ACADEMICAI_ENABLE_COST_MONITORING", "false").lower() in ("1", "true", "yes", "on")
-COST_CACHE_FILE = os.environ.get(
-    "ACADEMICAI_COST_CACHE_FILE",
-    str(Path("data") / "cost_cache.json"),
-)
-COST_CACHE_TTL_SECONDS = max(60, int(os.environ.get("ACADEMICAI_COST_CACHE_TTL_SECONDS", "600")))
-COST_REFRESH_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS", "8")))
-HEALTH_CHECK_BACKEND = os.environ.get("ACADEMICAI_HEALTH_CHECK_BACKEND", "true").lower() in ("1", "true", "yes", "on")
-HEALTH_CHECK_TIMEOUT_SECONDS = max(0.2, float(os.environ.get("ACADEMICAI_HEALTH_CHECK_TIMEOUT_SECONDS", "2")))
-PID_FILE = Path(os.environ.get("ACADEMICAI_PID_FILE", str(Path(__file__).resolve().parent / "server.pid")))
 
 _cost_lock = threading.Lock()
 _cost_refresh_in_flight = False
 
-MAX_MESSAGES = max(1, int(os.environ.get("ACADEMICAI_MAX_MESSAGES", "300")))
-MAX_TOOLS = max(0, int(os.environ.get("ACADEMICAI_MAX_TOOLS", "256")))
-MAX_MESSAGE_TEXT_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_MESSAGE_TEXT_CHARS", "200000")))
-MAX_TOOL_SCHEMA_CHARS = max(256, int(os.environ.get("ACADEMICAI_MAX_TOOL_SCHEMA_CHARS", "100000")))
-MAX_REQUEST_JSON_CHARS = max(1024, int(os.environ.get("ACADEMICAI_MAX_REQUEST_JSON_CHARS", "2000000")))
-
-RATE_LIMIT_PER_MINUTE = max(0, int(os.environ.get("ACADEMICAI_RATE_LIMIT_PER_MINUTE", "120")))
 _rate_limit_lock = threading.Lock()
 _rate_limit_buckets: dict[str, list[float]] = {}
 
@@ -712,7 +681,7 @@ def _enforce_chat_rate_limit(request: Request, key: str) -> None:
 
     bucket = _rate_limit_bucket(request, key)
     now = time.time()
-    window_start = now - 60.0
+    window_start = now - float(RATE_LIMIT_WINDOW_SECONDS)
 
     with _rate_limit_lock:
         hits = [ts for ts in _rate_limit_buckets.get(bucket, []) if ts >= window_start]
@@ -794,13 +763,13 @@ from logging.handlers import TimedRotatingFileHandler
 log_formatter = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
 
 # TimedRotatingFileHandler for general logs (INFO and above), rotated daily, 30 days retention
-log_file_path = os.environ.get("ACADEMICAI_PROXY_LOG_FILE", "server.log")
+log_file_path = LOG_FILE_PATH
 info_handler = TimedRotatingFileHandler(log_file_path, when="D", interval=1, backupCount=30, encoding="utf-8")
 info_handler.setLevel(logging.INFO)
 info_handler.setFormatter(log_formatter)
 
 # TimedRotatingFileHandler for error logs (ERROR and above), rotated daily, 30 days retention
-err_file_path = os.environ.get("ACADEMICAI_PROXY_ERR_FILE", "server.err.log")
+err_file_path = ERR_FILE_PATH
 error_handler = TimedRotatingFileHandler(err_file_path, when="D", interval=1, backupCount=30, encoding="utf-8")
 error_handler.setLevel(logging.ERROR)
 error_handler.setFormatter(log_formatter)
@@ -848,6 +817,7 @@ def verify_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
 
 @app.on_event("startup")
 def _on_startup() -> None:
+    validate_config()
     _write_pid_file()
 
 
@@ -1086,14 +1056,22 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
             if tool_calls_data:
                 # Tool-Call-Chunks im OpenAI-Streaming-Format
                 for chunk in build_tool_calls_sse_chunks(completion_id, created_ts, resp_model, tool_calls_data):
+                    if STREAM_CHUNK_DELAY_MS > 0:
+                        time.sleep(STREAM_CHUNK_DELAY_MS / 1000.0)
                     yield f"data: {json.dumps(chunk)}\n\n"
             else:
                 # Normaler Text-Response als SSE
                 # Chunk 1: role delta
+                if STREAM_CHUNK_DELAY_MS > 0:
+                    time.sleep(STREAM_CHUNK_DELAY_MS / 1000.0)
                 yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': ''}, 'finish_reason': None}]})}\n\n"
                 # Chunk 2: Content
+                if STREAM_CHUNK_DELAY_MS > 0:
+                    time.sleep(STREAM_CHUNK_DELAY_MS / 1000.0)
                 yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {'content': content}, 'finish_reason': None}]})}\n\n"
                 # Chunk 3: finish
+                if STREAM_CHUNK_DELAY_MS > 0:
+                    time.sleep(STREAM_CHUNK_DELAY_MS / 1000.0)
                 yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish_reason}], 'usage': usage})}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -1128,6 +1106,7 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
 # --- Start ---
 
 if __name__ == "__main__":
+    validate_config()
     startup_banner = r"""
     _                _                 _      _      ___ 
    /_\  __ __ _  __| |___ _ __  _  _ _| |_ __(_)  _|_  |

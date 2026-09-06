@@ -47,6 +47,7 @@ def get_models() -> dict:
     return _get_provider().get_models()
 
 
+from .config import Settings, get_settings, validate_config  # noqa: F401
 from .tool_emulation import (  # noqa: F401
     inject_tools_into_messages,
     parse_tool_call,
@@ -57,6 +58,7 @@ from .tool_emulation import (  # noqa: F401
 
 __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
+    "Settings", "get_settings", "validate_config",
     "inject_tools_into_messages", "parse_tool_call", "strip_tool_call_tag",
     "build_tool_calls_response", "build_tool_calls_sse_chunks",
 ]

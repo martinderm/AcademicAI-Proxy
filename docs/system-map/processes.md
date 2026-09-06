@@ -7,13 +7,13 @@
 
 ## 1. Request Lifecycle: `POST /v1/chat/completions`
 
-Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`](../../server.py):
+Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`](../../server.py), gesteuert durch die zentralen Richtlinien und Limits aus [`academicai/config.py`](../../academicai/config.py):
 
 ```
 [Inbound Client Request]
        │
        ▼
- 1. Authentifizierung & Insecure-Key-Check (Bearer Token)
+ 1. Authentifizierung & Insecure-Key-Check (Bearer Token via API_KEY aus academicai/config.py)
        │
        ▼
  2. Payload-Validierung & Schutzgrenzen (_validate_chat_request_body & Rate-Limiting):
@@ -21,7 +21,7 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
     ├─ Nachrichtenanzahl & Textlänge vs. ACADEMICAI_MAX_MESSAGES / MAX_MESSAGE_TEXT_CHARS (413)
     ├─ Tools-Anzahl & Schema-Größe vs. ACADEMICAI_MAX_TOOLS / MAX_TOOL_SCHEMA_CHARS (413)
     ├─ Strukturiertes Logging in server.log bei jeder Abweisung (413/422/400)
-    └─ Token-Bucket Rate-Limiting (429)
+    └─ Token-Bucket Rate-Limiting vs. RATE_LIMIT_PER_MINUTE / RATE_LIMIT_WINDOW_SECONDS (429)
        │
        ▼
  3. Message-Normalisierung & Heuristiken:
@@ -101,6 +101,7 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_hardening_security_runtime.py` | Schutz gegen Klartext-Leakage, Insecure Key Detection, Mail-Destruction Guard. |
 | `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
 | `test_skill_snippets.py` | Dynamisches Self-Learning und Topic-Matching für Tool-Empfehlungen. |
+| `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
 
 ### Sicherheits-Baselines der Testumgebung

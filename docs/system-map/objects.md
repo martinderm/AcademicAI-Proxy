@@ -90,24 +90,47 @@ In `skill_snippets.json` persistierte Heuristik-Tipps:
 
 ---
 
-## 4. Konfiguration & Runtime State
+## 4. Konfiguration & Runtime State ([`academicai/config.py`](../../academicai/config.py))
 
-| Variable / File | Typ | Zweck |
-| :--- | :--- | :--- |
-| `ACADEMICAI_PROXY_PORT` | `int` (Default: `11435`) | Live-Listen-Port für eingehende Client-Requests |
-| `ACADEMICAI_PROXY_API_KEY` | `str (Secret)` | Bearer Token für Client-Authentifizierung am Proxy |
-| `ACADEMICAI_CLIENT_ID` | `str (Secret)` | BOKU Backend API Client ID |
-| `ACADEMICAI_CLIENT_SECRET` | `str (Secret)` | BOKU Backend API Client Secret |
-| `ACADEMICAI_DEBUG_DUMPS` | `bool` | Schreibt Rohdaten nach `last_backend_request.json` |
-| `ACADEMICAI_RETRY_MAX` | `int` (Default: `2`) | Maximale Retry-Wiederholungen bei Backend-Netzwerkfehlern |
-| `ACADEMICAI_RETRY_BASE_MS` | `int` (Default: `300`) | Basis-Wartezeit für exponentielles Backoff bei Retries |
-| `ACADEMICAI_MAX_MESSAGES` | `int` (Default: `300`) | Maximal zulässige Anzahl an Chat-Nachrichten pro Request (Schutzgrenze 413) |
-| `ACADEMICAI_MAX_TOOLS` | `int` (Default: `256`) | Maximal übermittelte Tool-Definitionen (Schutz vor 413 bei Tool-reichen Clients wie Copilot) |
-| `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` | `int` (Default: `200000`) | Max. Zeichenlänge pro Einzelnachricht (Text/Prompt-Payload; Schutzgrenze 413) |
-| `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` | `int` (Default: `100000`) | Max. Zeichenlänge pro Tool-JSON-Schema (Schutzgrenze 413) |
-| `ACADEMICAI_MAX_REQUEST_JSON_CHARS` | `int` (Default: `2000000`) | Max. Gesamtgröße des Request-JSON-Strings (Schutzgrenze 413) |
-| `ACADEMICAI_RATE_LIMIT_PER_MINUTE` | `int` (Default: `120`) | Max. Anfragen pro Minute pro IP/Token-Bucket (Schutzgrenze 429) |
-| `ACADEMICAI_TEST_BASE_URL` | `str` (Default: `http://127.0.0.1:11436`) | Test-Fallback-URL in `tests/_local_env.py` zur Port-Isolation |
-| `server.ALLOWED_MODELS` | `list[str]` | Modellkonstante (`["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"]`) für Verträge & Discovery |
-| `server.pid` | File (`int`) | Prozess-ID des laufenden Proxy-Daemons |
-| `server.log` | File | Aktiver Log-Stream mit täglicher Rotation (30 Tage Retention) |
+Das Modul [`academicai/config.py`](../../academicai/config.py) ist die zentrale **Single Source of Truth (SSOT)** für alle Laufzeitkonfigurationen, Umgebungsvariablen, Standardwerte, Schutzgrenzen und Validierungen des Proxies.
+
+### Entkoppelte Initialisierung & Startup-Validierung
+- **Kein Crash beim Import:** Das reine Importieren von `academicai.config` oder `server` löst keine fatalen Validierungsfehler (`RuntimeError`) aus, selbst wenn Umgebungsvariablen nicht gesetzt sind oder Standard-Testschlüssel verwendet werden.
+- **Explizite Validierung (`validate_config()`):** Die Integritätsprüfung des Proxy-API-Keys (`_validate_proxy_api_key`) wird gezielt beim Anwendungsstart (`@app.on_event("startup")` bzw. `if __name__ == "__main__":`) oder explizit über `validate_config()` aufgerufen.
+- **Rückwärtskompatibilität:** `server.py` re-exportiert alle Konfigurationskonstanten sowie `_validate_proxy_api_key`, sodass bestehende Tests und externe Aufrufer ohne Änderungen weiterfunktionieren.
+
+### Konfigurations-Schema & Defaults
+
+| Variable / Konstante | Env-Variable | Typ | Default | Zweck |
+| :--- | :--- | :--- | :--- | :--- |
+| `PORT` | `ACADEMICAI_PROXY_PORT` | `int` | `11435` | Live-Listen-Port für eingehende Client-Requests |
+| `API_KEY` | `ACADEMICAI_PROXY_API_KEY` | `str (Secret)` | `"test-proxy-key-123456"` | Bearer Token für Client-Authentifizierung am Proxy |
+| `BASE_URL` | `ACADEMICAI_BASE_URL` | `str` | `"https://academic-ai.boku.ac.at/api/v1"` | BOKU AcademicAI API-Basis-URL |
+| `CLIENT_ID` | `ACADEMICAI_CLIENT_ID` | `str (Secret)` | `""` | BOKU Backend API Client ID |
+| `CLIENT_SECRET` | `ACADEMICAI_CLIENT_SECRET` | `str (Secret)` | `""` | BOKU Backend API Client Secret |
+| `HEALTH_CHECK_BACKEND` | `ACADEMICAI_HEALTH_CHECK_BACKEND` | `bool` | `True` | Aktiviert Backend-Connectivity-Check in `/health` |
+| `HEALTH_CHECK_TIMEOUT_SECONDS` | `ACADEMICAI_HEALTH_CHECK_TIMEOUT_SECONDS` | `float` | `2.0` | Timeout für Backend-Health-Check |
+| `ENABLE_COST_MONITORING` | `ACADEMICAI_ENABLE_COST_MONITORING` | `bool` | `True` | Schaltet Cost-Header & Monitoring aktiv |
+| `COST_CACHE_FILE` | `ACADEMICAI_COST_CACHE_FILE` | `str` | `"data/cost_cache.json"` | Pfad zur lokalen Cost-Cache-Datei |
+| `COST_CACHE_TTL_SECONDS` | `ACADEMICAI_COST_CACHE_TTL_SECONDS` | `int` | `600` | Gültigkeitsdauer des Cost-Caches in Sekunden |
+| `COST_REFRESH_TIMEOUT_SECONDS` | `ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS` | `float` | `8.0` | Timeout für Live-Refresh der Cost-API |
+| `MAX_MESSAGES` | `ACADEMICAI_MAX_MESSAGES` | `int` | `200` | Maximal zulässige Anzahl an Chat-Nachrichten pro Request (Schutzgrenze 413) |
+| `MAX_TOOLS` | `ACADEMICAI_MAX_TOOLS` | `int` | `64` | Maximal übermittelte Tool-Definitionen (Schutzgrenze 413) |
+| `MAX_MESSAGE_TEXT_CHARS` | `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` | `int` | `500000` | Max. Zeichenlänge pro Einzelnachricht (Text/Prompt-Payload; Schutzgrenze 413) |
+| `MAX_TOOL_SCHEMA_CHARS` | `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` | `int` | `100000` | Max. Zeichenlänge pro Tool-JSON-Schema (Schutzgrenze 413) |
+| `MAX_REQUEST_JSON_CHARS` | `ACADEMICAI_MAX_REQUEST_JSON_CHARS` | `int` | `2000000` | Max. Gesamtgröße des Request-JSON-Strings (Schutzgrenze 413) |
+| `RATE_LIMIT_PER_MINUTE` | `ACADEMICAI_RATE_LIMIT_PER_MINUTE` | `int` | `120` | Max. Anfragen pro Minute pro IP/Token-Bucket (Schutzgrenze 429) |
+| `RATE_LIMIT_WINDOW_SECONDS` | `ACADEMICAI_RATE_LIMIT_WINDOW_SECONDS` | `int` | `60` | Zeitfenster für Rate Limiting in Sekunden |
+| `ENABLE_HUMANIZATION_PASS` | `ACADEMICAI_ENABLE_HUMANIZATION_PASS` | `bool` | `False` | Aktiviert optionalen zweiten Pass zur Endantwort-Glättung |
+| `HUMANIZATION_TEMPERATURE` | `ACADEMICAI_HUMANIZATION_TEMPERATURE` | `float` | `0.7` | LLM-Temperatur für Humanisierungspass |
+| `DEFAULT_CHAT_TEMPERATURE` | `ACADEMICAI_DEFAULT_CHAT_TEMPERATURE` | `float` | `0.6` | Standard-Temperatur für Chat Completions |
+| `DEFAULT_TOOL_TEMPERATURE` | `ACADEMICAI_DEFAULT_TOOL_TEMPERATURE` | `float` | `0.1` | Standard-Temperatur bei Requests mit Tools |
+| `STREAM_CHUNK_DELAY_MS` | `ACADEMICAI_STREAM_CHUNK_DELAY_MS` | `int` | `0` | Künstliche Verzögerung zwischen SSE-Stream-Chunks (ms) |
+| `DEBUG_DUMPS` | `ACADEMICAI_DEBUG_DUMPS` | `bool` | `False` | Schreibt Rohdaten nach `last_backend_request.json` |
+| `ALLOWED_MODELS` | `ACADEMICAI_ALLOWED_MODELS` | `list[str]` | `["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"]` | Modellkonstante für Verträge & Discovery |
+| `PID_FILE` | `ACADEMICAI_PID_FILE` | `Path` | `Path("server.pid")` | Prozess-ID-Datei des laufenden Proxy-Daemons |
+| `LOG_FILE_PATH` | `ACADEMICAI_PROXY_LOG_FILE` | `str` | `"server.log"` | Aktiver Log-Stream mit täglicher Rotation (30 Tage Retention) |
+| `ERR_FILE_PATH` | `ACADEMICAI_PROXY_ERR_FILE` | `str` | `"server.err.log"` | Fehler-Log-Stream mit täglicher Rotation |
+| `RETRY_MAX` | `ACADEMICAI_RETRY_MAX` | `int` | `2` | Maximale Retry-Wiederholungen bei Backend-Netzwerkfehlern |
+| `RETRY_BASE_MS` | `ACADEMICAI_RETRY_BASE_MS` | `int` | `300` | Basis-Wartezeit für exponentielles Backoff bei Retries |
+
