@@ -1,4 +1,4 @@
-﻿"""
+"""
 AcademicAI OpenAI-kompatibler Proxy Server
 
 Exponiert AcademicAI als OpenAI-kompatible API auf Port 11435.
@@ -23,11 +23,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from starlette.concurrency import run_in_threadpool
-
 import academicai
 from academicai.auth import get_base_url, get_headers
 from academicai.security import redact_sensitive

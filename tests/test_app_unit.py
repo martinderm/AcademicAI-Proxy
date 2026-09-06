@@ -1,4 +1,4 @@
-﻿"""
+"""
 Unit tests for academicai.app module (FastAPI application factory & lifespan).
 
 Validates:
@@ -269,3 +269,29 @@ def test_backward_compatibility_server_and_academicai_reexports():
 
     for sym in app_module_symbols:
         assert hasattr(ai_app, sym), f"academicai.app is missing expected symbol: {sym}"
+
+
+def test_isolated_module_imports_without_server():
+    """Verify that every academicai domain module can be imported independently without server.py."""
+    import subprocess
+    import sys
+
+    modules = [
+        "academicai.config",
+        "academicai.auth",
+        "academicai.security",
+        "academicai.transformation",
+        "academicai.request_guards",
+        "academicai.tool_emulation",
+        "academicai.cost_monitoring",
+        "academicai.runtime",
+        "academicai.logging_config",
+        "academicai.humanization",
+        "academicai.app",
+        "academicai",
+    ]
+
+    for mod in modules:
+        cmd = [sys.executable, "-c", f"import sys; import {mod}; assert 'server' not in sys.modules"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        assert res.returncode == 0, f"Module {mod} failed isolated import test: {res.stderr}"

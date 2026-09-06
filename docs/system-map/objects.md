@@ -353,6 +353,18 @@ Das Modul [`academicai/app.py`](../../academicai/app.py) kapselt die FastAPI-Anw
 - **`academicai/tool_emulation.py`:** Beherbergt `apply_post_tool_guard` / `_apply_post_tool_guard` (Follow-up-Stabilisierung nach Tool-Ergebnissen).
 - **`academicai/transformation.py`:** Konsolidiert `extract_text_content` / `_extract_text_content` (Normalisierung von Strings und Multipart-Dicts) als Single Source of Truth.
 
+---
 
+## 11. CLI-Entrypoint & Kompatibilitätsschicht ([`server.py`](../../server.py))
 
+Das Root-Skript [`server.py`](../../server.py) wurde im Zuge des Refactorings zu einem reinen, schlanken Einstiegspunkt und Kompatibilitäts-Layer kontrahiert (< 200 Zeilen):
 
+- **Reiner CLI-Runner:**
+  - Lädt Umgebungsvariablen (`load_dotenv()`).
+  - Zeigt das Start-Banner mit Port, Auth-Status, Log-Rotation, Humanisierungs-Status und Request-Limits an.
+  - Startet den ASGI-Server via `uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="info")`.
+- **Vollständige Rückwärtskompatibilität:**
+  - Re-exportiert alle wesentlichen Symbole, Einstellungen und Hilfsfunktionen aus den Domänenmodulen (`academicai.app`, `academicai.config`, `academicai.request_guards`, `academicai.tool_emulation`, `academicai.transformation`, `academicai.cost_monitoring`, `academicai.runtime`, `academicai.logging_config`, `academicai.humanization`).
+  - Stellt sicher, dass bestehende Test-Fixtures (`server.app`), Test-Monkeypatches (`server.MAX_MESSAGES`, `server.academicai.completion`, `server._check_backend_health` etc.) und externe Aufrufer ohne Codeänderung fehlerfrei funktionieren.
+- **Azyklische Modulstruktur:**
+  - `server.py` enthält keinerlei eigene Domänenlogik mehr; alle Abhängigkeiten fließen unidirektional von `server.py` in die `academicai`-Module.
