@@ -232,6 +232,15 @@ from academicai.cost_monitoring import (
     get_cost_cache_with_lazy_refresh,
     get_cost_status_payload,
 )
+from academicai.runtime import (
+    write_pid_file,
+    _write_pid_file,
+    cleanup_pid_file,
+    _cleanup_pid_file,
+    check_backend_health,
+    _check_backend_health,
+    get_health_payload,
+)
 
 
 def _build_humanization_messages(original_user_query: str, structured_content: str) -> list:
@@ -270,56 +279,6 @@ async def _run_humanization_pass(model: str, original_user_query: str, structure
     except Exception as e:
         log.warning(f"humanization pass failed, fallback to first-pass content: {e}")
         return None
-
-
-def _write_pid_file() -> None:
-    try:
-        PID_FILE.write_text(f"{os.getpid()}\n", encoding="utf-8")
-    except Exception as e:
-        log.warning(f"could not write pid file {PID_FILE}: {e}")
-
-
-def _cleanup_pid_file() -> None:
-    try:
-        if not PID_FILE.exists():
-            return
-        raw = PID_FILE.read_text(encoding="utf-8").strip()
-        if raw and raw != str(os.getpid()):
-            return
-        PID_FILE.unlink(missing_ok=True)
-    except Exception as e:
-        log.warning(f"could not cleanup pid file {PID_FILE}: {e}")
-
-
-def _check_backend_health() -> dict:
-    if not HEALTH_CHECK_BACKEND:
-        return {"enabled": False, "ok": None}
-
-    started = time.perf_counter()
-    try:
-        endpoint = f"{get_base_url().rstrip('/')}/api/v1/llm/models"
-        headers = dict(get_headers() or {})
-        with httpx.Client(timeout=HEALTH_CHECK_TIMEOUT_SECONDS) as client:
-            resp = client.get(endpoint, headers=headers)
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        ok = resp.status_code == 200
-        out = {
-            "enabled": True,
-            "ok": ok,
-            "status_code": resp.status_code,
-            "latency_ms": latency_ms,
-        }
-        if not ok:
-            out["error"] = "backend responded with non-200 status"
-        return out
-    except Exception as e:
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        return {
-            "enabled": True,
-            "ok": False,
-            "latency_ms": latency_ms,
-            "error": str(e),
-        }
 
 # --- Setup ---
 from logging.handlers import TimedRotatingFileHandler
@@ -392,10 +351,7 @@ def _on_shutdown() -> None:
 @app.get("/health")
 def health():
     backend = _check_backend_health()
-    status = "ok"
-    if backend.get("enabled") and backend.get("ok") is False:
-        status = "degraded"
-    return {"status": status, "service": "academicai-proxy", "backend": backend}
+    return get_health_payload(backend)
 
 
 @app.get("/internal/cost-status")

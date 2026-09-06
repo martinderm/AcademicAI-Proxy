@@ -104,7 +104,27 @@ Das Modul überwacht Kosten und Quoten des BOKU-Backends non-blocking:
 
 ---
 
-## 6. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
+## 6. Runtime-Lifecycle & Health-Check-Pipeline ([`academicai/runtime.py`](../../academicai/runtime.py))
+
+Verwaltet den Server-Daemon-Lifecycle und die Überwachung der Upstream-Verbindung:
+
+1. **Server-Startup (`_on_startup`):**
+   - Ruft `validate_config()` zur Integritätsprüfung des Proxy-API-Keys auf.
+   - Ruft `_write_pid_file()` auf, stellt sicher, dass das Zielverzeichnis existiert, und schreibt die aktuelle Prozess-PID atomar in `PID_FILE`.
+2. **Server-Shutdown (`_on_shutdown`):**
+   - Ruft `_cleanup_pid_file()` auf. Prüft, ob die Datei existiert und deren Inhalt exakt der aktuellen PID entspricht, bevor sie gelöscht wird (verhindert Löschung fremder/neuerer Daemon-Dateien).
+3. **Health-Check-Workflow (`GET /health`):**
+   - Ruft `_check_backend_health()` auf:
+     - Prüft `HEALTH_CHECK_BACKEND`. Falls deaktiviert, Rückgabe von `{"enabled": False, "ok": None}`.
+     - Falls aktiviert: HTTP-GET auf BOKU `/api/v1/llm/models` mit Timeout `HEALTH_CHECK_TIMEOUT_SECONDS` und Auth-Headern.
+     - Ermittelt Antwortstatus und misst Request-Latenz via `time.perf_counter()`.
+   - Übergibt das Ergebnis an `get_health_payload(backend)`:
+     - Berechnet Gesamtstatus (`"ok"` bzw. `"degraded"` bei `enabled=True` und `ok=False`).
+     - Liefert standardisiertes JSON-Payload für Monitoring und Health-Probes.
+
+---
+
+## 7. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
 
 Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab und sichern die Schnittstellenverträge vor Refactorings:
 
@@ -121,6 +141,7 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |
 | `test_request_guards.py` | Validiert Inbound-Payloads (422/413), JSON-Größenlimits, Token-Bucket Rate-Limiting (429), Bucket-Sweep / TTL-Cleanup gegen unbegrenztes Speicherwachstum sowie Server-Re-Exports. |
 | `test_cost_monitoring_unit.py` | Unit-Tests für akademische Kostenüberwachung: Parsing (`_safe_float`, `_parse_iso_ts`), Payload-Extraktion (`_extract_cost_summary`), Stale-Prüfung (`is_cost_cache_stale`), Header-Generierung (`build_cost_headers`), atomare Cache-Roundtrips, Thread-Sicherheit und Server-Re-Exports. |
+| `test_runtime_unit.py` | Unit-Tests für Laufzeit-Lifecycle: PID-File-Erstellung und -Bereinigung mit PID-Matching, Backend-Health-Checks (Erfolg, Timeout, Fehler, Deaktivierung), Health-Payload-Generierung (`ok`/`degraded`) und Server-Re-Exports. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
 
 ### Sicherheits-Baselines der Testumgebung

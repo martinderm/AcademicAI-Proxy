@@ -86,6 +86,15 @@ from .cost_monitoring import (  # noqa: F401
     _get_cost_cache_with_lazy_refresh,
     get_cost_status_payload,
 )
+from .runtime import (  # noqa: F401
+    write_pid_file,
+    _write_pid_file,
+    cleanup_pid_file,
+    _cleanup_pid_file,
+    check_backend_health,
+    _check_backend_health,
+    get_health_payload,
+)
 
 __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
@@ -106,5 +115,9 @@ __all__ = [
     "refresh_cost_cache_background", "_refresh_cost_cache_background",
     "get_cost_cache_with_lazy_refresh", "_get_cost_cache_with_lazy_refresh",
     "get_cost_status_payload",
+    "write_pid_file", "_write_pid_file",
+    "cleanup_pid_file", "_cleanup_pid_file",
+    "check_backend_health", "_check_backend_health",
+    "get_health_payload",
 ]
 

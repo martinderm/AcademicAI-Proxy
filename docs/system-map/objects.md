@@ -215,4 +215,43 @@ Das Modul [`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py)
 - **Server-Re-Exports:**
   - `server.py` re-exportiert alle wesentlichen Symbole (`_get_cost_cache_with_lazy_refresh`, `_build_cost_headers`, `_is_cost_cache_stale`, `_safe_float`, `_read_cost_cache`, `_write_cost_cache`, `_cost_lock`).
 
+---
+
+## 7. Runtime-Lifecycle & Health-Zustand ([`academicai/runtime.py`](../../academicai/runtime.py))
+
+Das Modul [`academicai/runtime.py`](../../academicai/runtime.py) kapselt Lifecycle-Helfer für das Prozess- und Daemon-Management sowie die Zustandsermittlung des Proxies und dessen Upstream-Anbindung:
+
+### PID-File Management (`write_pid_file`, `cleanup_pid_file`)
+- **Prozessregistrierung (`write_pid_file`):**
+  - Schreibt die PID des aktuellen Prozesses (`os.getpid()`) in `PID_FILE` (Default: `server.pid`).
+  - Stellt sicher, dass das übergeordnete Verzeichnis existiert (`path.parent.mkdir(parents=True, exist_ok=True)`).
+  - Fehlertolerant: Schlägt das Schreiben fehl (z.B. Dateisystem-Berechtigungen), wird eine Logging-Warnung erzeugt, ohne den Prozessstart abstürzen zu lassen.
+- **Prozessabmeldung (`cleanup_pid_file`):**
+  - Entfernt die PID-Datei nur, wenn die darin gespeicherte PID exakt der des aktuellen Prozesses entspricht (`raw == str(os.getpid())`).
+  - Verhindert Race Conditions: Läuft bereits ein neuerer Prozess oder gehört die Datei einem anderen Prozess, bleibt sie unangetastet.
+  - Ignoriert nicht existierende Dateien fehlertolerant.
+
+### Backend-Connectivity Health Checks (`check_backend_health`)
+- Führt bei aktiviertem Check (`HEALTH_CHECK_BACKEND=True`) einen synchronen HTTP-GET-Aufruf gegen den BOKU-Endpunkt `/api/v1/llm/models` via `httpx.Client` aus (Timeout konfiguriert über `HEALTH_CHECK_TIMEOUT_SECONDS`, Default: 2.0s).
+- Misst die Latenz via `time.perf_counter()` in Millisekunden (`latency_ms`).
+- Liefert ein strukturiertes Ergebnis-Dictionary zurück:
+  - Bei Erfolg (HTTP 200): `{"enabled": True, "ok": True, "status_code": 200, "latency_ms": <int>}`
+  - Bei Backend-Fehler (HTTP != 200): `{"enabled": True, "ok": False, "status_code": <code>, "latency_ms": <int>, "error": "backend responded with non-200 status"}`
+  - Bei Exception (z.B. Timeout/Verbindungsabbruch): `{"enabled": True, "ok": False, "latency_ms": <int>, "error": "<str>"}`
+  - Bei Deaktivierung (`HEALTH_CHECK_BACKEND=False`): `{"enabled": False, "ok": None}`
+
+### Standardisierte Health-Payload-Generierung (`get_health_payload`)
+- Erstellt das finale JSON-Payload für den öffentlichen `/health`-Endpunkt:
+  - `status`: `"ok"` (wenn Backend erreichbar oder Check deaktiviert), `"degraded"` (wenn Check aktiviert und Backend nicht erreichbar).
+  - `service`: `"academicai-proxy"`
+  - `backend`: Enthaltenes Dictionary aus `check_backend_health()`.
+- Automatischer Fallback: Wird `get_health_payload()` ohne Backend-Parameter aufgerufen, führt es selbstständig `check_backend_health()` aus.
+
+### Dynamische Attributauflösung & Server-Kompatibilität
+- **Dynamische Konfiguration (`_get_setting`):**
+  - Prüft Attribute auf dem geladenen `server`-Modul (`PID_FILE`, `HEALTH_CHECK_BACKEND`, `HEALTH_CHECK_TIMEOUT_SECONDS`, `get_base_url`, `get_headers`) vor dem Fallback auf `academicai.config`.
+  - Dadurch bleiben Test-Suites mit `monkeypatch.setattr(server, ...)` vollständig abwärtskompatibel.
+- **Server-Re-Exports:**
+  - `server.py` re-exportiert `write_pid_file`, `_write_pid_file`, `cleanup_pid_file`, `_cleanup_pid_file`, `check_backend_health`, `_check_backend_health`, `get_health_payload`.
+
 
