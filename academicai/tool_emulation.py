@@ -20,27 +20,78 @@ das Ergebnis als role=tool zurueck -- der Proxy leistet nur Formatkonvertierung.
 import json
 import re
 import uuid
-from typing import Optional
+from typing import Optional, Any
 
 
-def _parse_json_loose(content: str):
-    """Parst JSON robust: raw JSON oder ```json ...``` Codefence."""
-    if not content:
+def _repair_json_str(raw: str) -> str:
+    """Bereinigt gängige LLM-JSON-Syntaxfehler wie Trailing Commas vor } oder ]."""
+    return re.sub(r",+\s*([\}\]])", r"\1", raw)
+
+
+def _repair_and_load_json(raw: str) -> Optional[Any]:
+    """
+    Parst JSON robust mit mehrstufiger Reparatur:
+    1. Standard json.loads
+    2. json.loads mit strict=False (erlaubt unescapte Steuerzeichen/Newlines/Tabs in Strings)
+    3. Trailing-Comma-Bereinigung vor } oder ] (,\\s*([}\\]]) -> \\1)
+    4. Reparatur ungültiger Backslash-Escapes (z.B. Windows-Pfade C:\\users\\...)
+    """
+    if not raw or not isinstance(raw, str):
         return None
-    s = content.strip()
+    s = raw.strip()
+    if not s:
+        return None
 
+    # 1. Direkter Parse (Normalfall, schnell)
     try:
         return json.loads(s)
     except (json.JSONDecodeError, ValueError):
         pass
 
+    # 2. strict=False (erlaubt unescapte Steuerzeichen/Newlines in Strings)
+    try:
+        return json.loads(s, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 3. Trailing Commas bereinigen
+    repaired = _repair_json_str(s)
+    try:
+        return json.loads(repaired)
+    except (json.JSONDecodeError, ValueError):
+        pass
+    try:
+        return json.loads(repaired, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 4. Ungültige Escape-Sequenzen reparieren
+    try:
+        fixed_escapes = re.sub(r'\\u(?![0-9a-fA-F]{4})', r'\\\\u', repaired)
+        fixed_escapes = re.sub(r'\\([^"\\/bfnrtu])', r'\\\\\1', fixed_escapes)
+        return json.loads(fixed_escapes, strict=False)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    return None
+
+
+def _parse_json_loose(content: str):
+    """Parst JSON robust: raw JSON oder ```json ...``` Codefence mit Reparatur."""
+    if not content or not isinstance(content, str):
+        return None
+    s = content.strip()
+
+    parsed = _repair_and_load_json(s)
+    if parsed is not None:
+        return parsed
+
     fence = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```$", s, re.IGNORECASE | re.DOTALL)
     if fence:
         inner = fence.group(1).strip()
-        try:
-            return json.loads(inner)
-        except (json.JSONDecodeError, ValueError):
-            return None
+        parsed = _repair_and_load_json(inner)
+        if parsed is not None:
+            return parsed
 
     return None
 
@@ -74,32 +125,128 @@ If you can answer directly from your knowledge:
 """
 
 
+def _format_default_val(val: Any) -> str:
+    """Formatiert einen Default-Wert für TypeScript-Signaturen."""
+    if isinstance(val, bool):
+        return "true" if val else "false"
+    if isinstance(val, (int, float)):
+        return str(val)
+    if isinstance(val, str):
+        return json.dumps(val)
+    try:
+        return json.dumps(val)
+    except Exception:
+        return str(val)
+
+
+def _format_param_type(pdef: dict) -> str:
+    """Formatiert den Typ eines Parameters im TypeScript-Stil."""
+    enum_vals = pdef.get("enum")
+    if enum_vals and isinstance(enum_vals, (list, tuple)):
+        if len(enum_vals) > 4:
+            items = [json.dumps(x) for x in enum_vals[:4]] + ["..."]
+        else:
+            items = [json.dumps(x) for x in enum_vals]
+        return " | ".join(items)
+
+    raw_type = pdef.get("type", "any")
+    if raw_type == "integer":
+        return "number"
+    elif raw_type == "array":
+        items = pdef.get("items")
+        if isinstance(items, dict):
+            item_type = items.get("type")
+            if item_type == "integer":
+                item_type = "number"
+            if item_type:
+                return f"{item_type}[]"
+        return "any[]"
+    elif raw_type == "object":
+        props = pdef.get("properties")
+        if isinstance(props, dict) and props:
+            keys = ", ".join(props.keys())
+            return f"{{{keys}}}"
+        return "object"
+    return str(raw_type)
+
+
 def _compact_tool_def(tool: dict) -> str:
-    """Einzeilige Darstellung eines Tools fuer den System-Prompt."""
-    if tool.get("type") != "function":
+    """Einzeilige TypeScript-aehnliche Signatur eines Tools fuer den System-Prompt."""
+    if not isinstance(tool, dict) or tool.get("type") != "function":
         return ""
-    fn = tool["function"]
+    fn = tool.get("function")
+    if not isinstance(fn, dict):
+        return ""
     name = fn.get("name", "?")
-    desc = fn.get("description", "").split("\n")[0][:120]
-    params = fn.get("parameters", {}).get("properties", {})
-    required = set(fn.get("parameters", {}).get("required", []))
+    desc = (fn.get("description") or "").split("\n")[0][:120].strip()
+
+    params_obj = fn.get("parameters") or {}
+    params = params_obj.get("properties") or {}
+    required = set(params_obj.get("required") or [])
+
     param_parts = []
     for pname, pdef in params.items():
-        ptype = pdef.get("type", "any")
+        if not isinstance(pdef, dict):
+            pdef = {}
         opt = "" if pname in required else "?"
-        param_parts.append(f"{pname}{opt}: {ptype}")
-    param_str = ", ".join(param_parts) if param_parts else ""
-    return f"- {name}({param_str}) -- {desc}"
+        ptype = _format_param_type(pdef)
+        default_str = ""
+        if "default" in pdef and pdef["default"] is not None:
+            default_str = f" = {_format_default_val(pdef['default'])}"
+        param_parts.append(f"{pname}{opt}: {ptype}{default_str}")
+
+    param_str = ", ".join(param_parts)
+    desc_str = f" -- {desc}" if desc else ""
+    return f"- {name}({param_str}){desc_str}"
 
 
-def build_json_mode_system_prompt(tools: list) -> str:
-    """Baut den vollstaendigen System-Prompt fuer JSON-Mode Tool-Emulation."""
+def _extract_specific_tool_name(tool_choice: Any) -> Optional[str]:
+    """Extrahiert den Tool-Namen, falls tool_choice ein bestimmtes Tool vorgibt."""
+    if not tool_choice:
+        return None
+    if isinstance(tool_choice, str):
+        choice = tool_choice.strip()
+        if choice.lower() not in ("auto", "none", "required"):
+            return choice
+    elif isinstance(tool_choice, dict):
+        fn = tool_choice.get("function")
+        if isinstance(fn, dict) and fn.get("name"):
+            return str(fn["name"]).strip()
+        if tool_choice.get("name"):
+            return str(tool_choice["name"]).strip()
+    return None
+
+
+def build_json_mode_system_prompt(tools: list, tool_choice: Any = None) -> str:
+    """Baut den vollstaendigen System-Prompt fuer JSON-Mode Tool-Emulation mit tool_choice-Unterstuetzung."""
     tool_lines = [_compact_tool_def(t) for t in tools if _compact_tool_def(t)]
     tool_list = "\n".join(tool_lines) if tool_lines else "(none)"
-    return _TOOL_SYSTEM_TEMPLATE.format(tool_list=tool_list)
+    prompt = _TOOL_SYSTEM_TEMPLATE.format(tool_list=tool_list)
+
+    specific_tool = _extract_specific_tool_name(tool_choice)
+    if tool_choice == "required":
+        prompt += (
+            "\n\nCRITICAL INSTRUCTION - MANDATORY TOOL CALL:\n"
+            "A tool call is MANDATORY for this request. You are FORBIDDEN from responding with "
+            '{"action": "respond"}. You MUST choose and call an appropriate tool.'
+        )
+    elif specific_tool:
+        prompt += (
+            "\n\nCRITICAL INSTRUCTION - SPECIFIC TOOL MANDATORY:\n"
+            f"You MUST call the specific tool '{specific_tool}'. You are FORBIDDEN from responding with "
+            f'{{"action": "respond"}} or calling any other tool. You MUST execute a tool call for "{specific_tool}".'
+        )
+    elif tool_choice == "none":
+        prompt += (
+            "\n\nCRITICAL INSTRUCTION - NO TOOL CALLS:\n"
+            "You MUST NOT call any tools. You MUST respond with "
+            '{"action": "respond", "content": "<your answer>"}.'
+        )
+
+    return prompt
 
 
-def inject_tools_into_messages(messages: list, tools: list) -> list:
+def inject_tools_into_messages(messages: list, tools: list, tool_choice: Any = None) -> list:
     """
     Fuegt Tool-Definitionen als System-Message an den Anfang ein.
     transformation.py mergt sie automatisch in die erste User-Message.
@@ -110,10 +257,19 @@ def inject_tools_into_messages(messages: list, tools: list) -> list:
     """
     if not tools:
         return messages
-    prompt = build_json_mode_system_prompt(tools)
-    # Erinnerung ans Ende: wird via _normalize_messages in die letzte
-    # User-Message gemergt (consecutive same-role merge in Step 4)
-    json_reminder = {"role": "user", "content": "Respond with the JSON format as specified above."}
+    prompt = build_json_mode_system_prompt(tools, tool_choice=tool_choice)
+
+    specific_tool = _extract_specific_tool_name(tool_choice)
+    if tool_choice == "required":
+        reminder_content = 'Respond with a JSON tool call as specified above. A tool call is mandatory; {"action": "respond"} is forbidden.'
+    elif specific_tool:
+        reminder_content = f'Respond with a JSON tool call calling tool "{specific_tool}". You MUST call this specific tool; {{"action": "respond"}} is forbidden.'
+    elif tool_choice == "none":
+        reminder_content = 'Respond with JSON {"action": "respond", "content": "..."}. Do not call any tools.'
+    else:
+        reminder_content = "Respond with the JSON format as specified above."
+
+    json_reminder = {"role": "user", "content": reminder_content}
     return [{"role": "system", "content": prompt}] + messages + [json_reminder]
 
 
@@ -124,34 +280,34 @@ def inject_tools_into_messages(messages: list, tools: list) -> list:
 def _extract_json_object(text: str) -> Optional[dict]:
     """
     Robuste JSON-Extraktion aus einem Text. Versucht in dieser Reihenfolge:
-    1. Direktes json.loads (Normalfall)
-    2. JSON aus Markdown-Codeblock (```json ... ``` oder ``` ... ```)
-    3. Erstes vollstaendiges {...}-Objekt im Fliesstext
-
-    Damit werden Modelle abgedeckt, die trotz JSON-Mode-Anweisung
-    Erklaerungstext vor/nach dem JSON ausgeben.
+    1. Direktes _repair_and_load_json (Normalfall)
+    2. Markdown-Codeblock: ```json ... ``` oder ``` ... ```
+    3. Erstes vollstaendiges {...}-Objekt im Fliesstext per Klammer-Zaehler
     """
+    if not text or not isinstance(text, str):
+        return None
     text = text.strip()
     if not text:
         return None
 
-    # 1. Direkter Parse (Normalfall, kein Overhead)
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict):
-            return data
-    except (json.JSONDecodeError, ValueError):
-        pass
+    # 1. Direkter Parse (Normalfall)
+    data = _repair_and_load_json(text)
+    if isinstance(data, dict):
+        return data
 
     # 2. Markdown-Codeblock: ```json { ... } ``` oder ``` { ... } ```
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
     if match:
-        try:
-            data = json.loads(match.group(1))
+        block = match.group(1).strip()
+        data = _repair_and_load_json(block)
+        if isinstance(data, dict):
+            return data
+        start = block.find("{")
+        end = block.rfind("}")
+        if start >= 0 and end > start:
+            data = _repair_and_load_json(block[start : end + 1])
             if isinstance(data, dict):
                 return data
-        except (json.JSONDecodeError, ValueError):
-            pass
 
     # 3. Erstes vollstaendiges {...}-Objekt per Klammer-Zaehler finden
     start = text.find("{")
@@ -175,12 +331,10 @@ def _extract_json_object(text: str) -> Optional[dict]:
                 elif c == "}":
                     depth -= 1
                     if depth == 0:
-                        try:
-                            data = json.loads(text[start : i + 1])
-                            if isinstance(data, dict):
-                                return data
-                        except (json.JSONDecodeError, ValueError):
-                            pass
+                        candidate = text[start : i + 1]
+                        data = _repair_and_load_json(candidate)
+                        if isinstance(data, dict):
+                            return data
                         break
 
     return None
@@ -195,13 +349,14 @@ def _normalize_tool_call_entry(entry: dict) -> Optional[dict]:
         return None
     arguments = entry.get("arguments", {})
     if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments)
-        except (json.JSONDecodeError, ValueError):
+        parsed = _repair_and_load_json(arguments)
+        if isinstance(parsed, dict):
+            arguments = parsed
+        else:
             arguments = {}
-    if not isinstance(arguments, dict):
+    elif not isinstance(arguments, dict):
         arguments = {}
-    return {"name": name, "arguments": arguments}
+    return {"name": name.strip(), "arguments": arguments}
 
 
 def parse_json_mode_response(content: str) -> Optional[dict]:

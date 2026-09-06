@@ -74,7 +74,8 @@ $offlineTests = @(
     'tests/test_hardening_security_runtime.py',
     'tests/test_humanization_flow.py',
     'tests/test_config.py',
-    'tests/test_request_guards.py'
+    'tests/test_request_guards.py',
+    'tests/test_tool_emulation_unit.py'
 )
 
 

@@ -55,11 +55,31 @@ Das BOKU-Backend unterstützt ausschließlich die Rollen **`user`** und **`assis
 | Eingehende OpenAI-Rolle | Zielrolle am BOKU-Backend | Transformationsregel |
 | :--- | :--- | :--- |
 | `system` | `user` | Inhalt wird an den Beginn der allerersten `user`-Message eingefügt (Sticky System Message / Azure Prefix Caching). |
-| `tool` | `user` | Formatiert als `[Tool result (id: <tool_call_id>)]\n<content>`. |
+| `tool` | `user` | Standardisiertes Observation-Tag: `<tool_result id="<tool_call_id>" name="<tool_name>">\n<content>\n</tool_result>` (Attribute werden bei Fehlen weggelassen). |
 | `assistant` (mit `tool_calls`) | `assistant` | Formatiert als `[Tool call: <name>(<arguments>)]`. |
 | Aufeinanderfolgende gleiche Rollen | `user`/`assistant` | Werden zu einer einzigen Nachricht mit `\n\n` zusammengeführt. |
 
-### `ToolCall` (OpenAI-konform synthetisiert)
+### `ToolCall` & High-Density TypeScript Signatures ([`academicai/tool_emulation.py`](../../academicai/tool_emulation.py))
+Um das Prompt-Kontextfenster zu schonen, komprimiert `_compact_tool_def` OpenAI-JSON-Tools in prägnante TypeScript-Style-Signaturen:
+- **Format:** `- name(param1: type, param2?: type = default) -- description`
+- **Enums:** Werden als prägnante Typ-Unions dargestellt, z.B. `mode?: "exact" | "regex" | "fuzzy"`. Bei mehr als 4 Elementen erfolgt Truncation mit `...` (z.B. `"a" | "b" | "c" | "d" | ...`).
+- **Getypte Arrays:** Inspektion von `items.type` (z.B. `string[]`, `number[]`, `boolean[]`, `object[]`) statt unspezifischem `any` oder `array`.
+- **Defaults:** Explizite Angabe von Vorgabewerten (z.B. `limit?: number = 10`, `mode?: "exact" | "regex" = "exact"`).
+- **Flache Objektkeys:** Bei `type: "object"` mit deklarierten `properties` erfolgt eine flache Key-Auflistung, z.B. `filter?: {query, tags}`.
+- **Optionalität:** Pflichtparameter ohne `?`, optionale Parameter mit `?`.
+
+### `tool_choice` Hard Enforcement & Prompt Constraints
+- **`tool_choice: "required"`:** Injiziert zwingende Instruktionen, dass ein Tool-Call verpflichtend ist (`MANDATORY TOOL CALL`) und verbietet reine Textantworten (`{"action": "respond"}`).
+- **Spezifisches Tool:** Bei Angabe eines Ziel-Tools (`{"type": "function", "function": {"name": "tool_x"}}` oder `"tool_x"`) wird die Modellantwort strikt auf diesen Tool-Namen festgelegt.
+- **`tool_choice: "none"`:** Schließt Tool-Aufrufe explizit aus.
+
+### JSON-Repair & Sanitization State
+LLM-Antworten durchlaufen vor dem Parsing `_repair_and_load_json`:
+- Entfernen von Trailing Commas vor `}` oder `]` (`,\s*([}\]])` $\to$ `\1`).
+- Entschärfung nicht-escapeter Steuerzeichen / Zeilenumbrüche via `strict=False`.
+- Reparatur fehlerhafter Backslash-Escapes (z.B. unvollständige Unicode-Sequenzen oder Windows-Pfade `C:\users\...`).
+- Graceful Fallback auf sichere Standardwerte (`arguments = {}`) ohne Exception-Abstürze.
+
 Wird von [`academicai/tool_emulation.py`](../../academicai/tool_emulation.py) aus dem Modell-Freitext erzeugt:
 ```json
 {

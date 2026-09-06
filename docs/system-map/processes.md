@@ -56,11 +56,15 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
 
 Da das BOKU-Backend native Tool-Calling-Felder ignoriert, nutzt der Proxy eine synthetische Emulation:
 
-1. **Prompt Injektion (`inject_tools_into_messages`):**  
-   Fügt den System-Prompts eine formale Anweisung hinzu: *"To use tools, respond strictly with a ```json { "tool_calls": [...] } ``` code block."*
-2. **Extraktion (`parse_tool_calls`):**  
-   Durchsucht die Rohantwort des LLM mit Regex-Patterns nach Markdown-JSON-Blöcken, repariert unvollständige JSON-Klammern und isoliert Tool-Aufrufe.
-3. **Fallback-Handling:**  
+1. **High-Density TypeScript Signatures (`_compact_tool_def`):**  
+   Komprimiert Tool-Definitionen in einzeilige TypeScript-Signaturen mit Enums als Unions, getypten Arrays (`string[]`, `number[]`), Defaults und flachen Objekten (`filter?: {query, tags}`).
+2. **Prompt-Injektion & `tool_choice` Hard Enforcement (`inject_tools_into_messages`):**  
+   Injiziert Tools in den System-Prompt. Unterstützt harte Vorgaben (`tool_choice: "required"`, spezifische Tools oder `"none"`), die alternative Antworten verbieten. Ergänzend wird eine JSON-Erinnerungsnachricht ans Nachrichtenende angehängt.
+3. **Standardisierte Observation Tags (`academicai/transformation.py`):**  
+   Vorherige Tool-Ergebnisse werden als strukturierte `<tool_result id="{id}" name="{name}">\n{content}\n</tool_result>` Blöcke in die Benutzerhistorie überführt.
+4. **JSON-Repair & Extraktion (`parse_tool_calls`, `_repair_and_load_json`):**  
+   Entfernt Trailing Commas, repariert unescapte Steuerzeichen/Newlines via `strict=False`, korrigiert Backslash-Escapes und isoliert `tool_call` bzw. `tool_calls` Payloads.
+5. **Fallback-Handling:**  
    Falls das Modell JSON ausgibt, obwohl ein Mensch im Chat sitzt (`_is_human_readable_target`), formatiert [`format_arbitrary_json_for_humans`](../../academicai/tool_emulation.py) das JSON in lesbaren Fließtext um.
 
 ---
@@ -91,7 +95,8 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | Test-Suite | Testfokus & Schutzbereich |
 | :--- | :--- |
 | `test_characterization_endpoints.py` | Charakterisierungssuite für öffentliche Schnittstellenverträge (`GET /health`, `GET /internal/cost-status`, `GET /v1/models`, `POST /v1/chat/completions`) mittels `fastapi.testclient.TestClient`. |
-| `test_tool_emulation.py` | Extraktion von ```json ... ``` Blöcken, Reparatur von unvollständigen JSON-Objekten. |
+| `test_tool_emulation.py` | E2E- & Kern-Tests für JSON-Mode Responses und Fallback-Formatierer. |
+| `test_tool_emulation_unit.py` | Unit-Tests für TypeScript-Style Tool-Signaturen, hard `tool_choice` Enforcement, JSON-Repair Sanitization (Trailing Commas, Escapes) und `<tool_result>` XML-Tags. |
 | `test_multi_step_tool_emulation.py` | Mehrstufige Handoffs: Tool Call → Result → Next Call → Final Answer. |
 | `test_post_tool_guard.py` | Verhindert Endlosschleifen nach Tool-Fehlern oder phantomhaften Folgeaufrufen. |
 | `test_humanization_flow.py` | Erkennung menschlicher Chat-Kanäle (WhatsApp/Telegram) vs. maschineller JSON-Fallback. |

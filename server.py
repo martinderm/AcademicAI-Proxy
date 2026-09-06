@@ -593,6 +593,7 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
     # Tools extrahieren — werden via Prompt-Injection emuliert
     tools = body.get("tools") or body.get("functions") or []
     has_tools = bool(tools)
+    tool_choice = body.get("tool_choice")
     if ("tool_choice" in body) and not has_tools:
         log.warning("tool_choice provided without tools; ignoring tool emulation for this request")
     log.info(f"incoming: model={model} stream={body.get('stream')} roles={[m.get('role') for m in messages]} tools={len(tools)} has_tools={has_tools}")
@@ -602,7 +603,7 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
 
     # Tool-Definitionen in System-Prompt injizieren
     if tools:
-        messages = inject_tools_into_messages(messages, tools)
+        messages = inject_tools_into_messages(messages, tools, tool_choice=tool_choice)
 
     want_stream = bool(body.get("stream"))
     human_target_hint = _is_human_readable_target(messages)

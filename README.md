@@ -53,13 +53,13 @@ Users often observe that tool calling through this proxy feels surprisingly fast
 While reliable for everyday agent tasks, emulating function calling over a text-only backend comes with structural trade-offs:
 
 1. **Schema Compression Trade-offs:**  
-   To prevent context window explosion when dozens of tools are registered, tool schemas are compressed into compact signatures (`_compact_tool_def`). Highly complex, deeply nested JSON schemas or tools requiring large nested objects may suffer from reduced parameter precision compared to native OpenAI function calling engines.
-2. **Lack of Hard Enforced `tool_choice: "required"`:**  
-   Because the JSON schema must provide an escape hatch (`{"action": "respond", "content": "..."}`) for direct answers, the proxy cannot hard-enforce tool calls at the inference engine level. A model may occasionally choose to answer in prose even if a client desired an explicit tool call.
+   To prevent context window explosion when dozens of tools are registered, tool schemas are compressed into high-density TypeScript-style signatures (`_compact_tool_def`), featuring concise enum unions, typed arrays (`string[]`, `number[]`), defaults, and shallow objects (`{query, tags}`). Highly complex, deeply nested JSON schemas requiring deep object trees may still experience reduced parameter precision compared to native OpenAI function calling engines.
+2. **`tool_choice` Prompt Enforcement:**  
+   While the proxy enforces `tool_choice: "required"` and specific tool targets by strictly forbidding `{"action": "respond"}` in system prompts and reminders, enforcement happens at the prompt layer rather than the engine sampler level.
 3. **Multi-Turn Role Flattening (`role: "tool"`):**  
-   The underlying backend only accepts `user` and `assistant` roles. Tool results are flattened into user turns with `[Tool result (id: ...)]` prefixes. In deep multi-step loops (5+ sequential tool executions), this conversational history can sometimes cause attention drift or prompt looping, which the post-tool guard mitigates.
-4. **Probabilistic vs. Deterministic Parsing:**  
-   Unlike native APIs where tool arguments are constrained by grammar-based token samplers, the model generates raw JSON text. While the proxy includes a multi-tier fallback parser (direct parse → markdown codeblock extraction → bracket-depth counter), malformed JSON from weaker models can lead to retry loops or fallback to text.
+   The underlying backend only accepts `user` and `assistant` roles. Tool results are flattened into user turns with standardized `<tool_result id="..." name="...">` XML tags. In deep multi-step loops (5+ sequential tool executions), this conversational history can sometimes cause attention drift, which the post-tool guard mitigates.
+4. **Probabilistic vs. Deterministic Parsing & JSON Repair:**  
+   Unlike native APIs where tool arguments are constrained by grammar-based token samplers, the model generates raw JSON text. The proxy pairs a multi-tier fallback parser (direct parse → markdown codeblock extraction → bracket-depth counter) with automatic JSON-repair sanitization (trailing comma stripping, unescaped control character leniency, and path escape fixes).
 
 ## Endpoints
 

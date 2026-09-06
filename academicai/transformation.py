@@ -11,7 +11,7 @@ def _normalize_messages(messages: list) -> list:
     """
     Normalisiert Messages für das AcademicAI-Backend:
     - role=system  → in erste user-Message einbauen
-    - role=tool    → role=user mit "[Tool result]"-Prefix
+    - role=tool    → role=user mit "<tool_result>"-Tag
     - assistant mit tool_calls → nur Text-Content behalten
     AcademicAI unterstützt nur: user / assistant
     """
@@ -49,10 +49,16 @@ def _normalize_messages(messages: list) -> list:
         content = _extract_text(m.get("content"))
 
         if role == "tool":
-            # Tool-Result als user-Message (tool_call_id zur Zuordnung mitgeben)
-            tool_call_id = m.get("tool_call_id", "")
-            id_hint = f" (id: {tool_call_id})" if tool_call_id else ""
-            normalized.append({"role": "user", "content": f"[Tool result{id_hint}]\n{content}"})
+            # Tool-Result als user-Message mit standardisiertem <tool_result>-Tag
+            tool_call_id = str(m.get("tool_call_id") or "").strip()
+            tool_name = str(m.get("name") or "").strip()
+            attrs = []
+            if tool_call_id:
+                attrs.append(f'id="{tool_call_id}"')
+            if tool_name:
+                attrs.append(f'name="{tool_name}"')
+            attr_str = f" {' '.join(attrs)}" if attrs else ""
+            normalized.append({"role": "user", "content": f"<tool_result{attr_str}>\n{content}\n</tool_result>"})
         elif role == "assistant":
             # tool_calls aus der Gesprächshistorie lesbar darstellen
             tool_calls = m.get("tool_calls") or []
