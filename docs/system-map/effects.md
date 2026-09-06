@@ -21,8 +21,8 @@
 
 - **Standard Live-Port:** `127.0.0.1:11435`
   - Gesteuert über Umgebungsvariable `ACADEMICAI_PROXY_PORT`.
-- **E2E-Test-Port:** `127.0.0.1:11436`
-  - Strikt getrennt, damit Tests den produktiven Agentenbetrieb nicht unterbrechen.
+- **E2E-Test-Port & Test-Fallback:** `127.0.0.1:11436`
+  - Strikt getrennt, damit Tests den produktiven Agentenbetrieb nicht unterbrechen. `tests/_local_env.py` nutzt `11436` als Default-Fallback (`ACADEMICAI_TEST_BASE_URL`), wodurch versehentliche Zugriffe auf die Live-Instanz auf Port `11435` bei ungesetzten Env-Variablen ausgeschlossen sind.
 - **Prozess-Steuerung (`server.pid`):**
   - Beim Start via [`start_server.ps1`](../../start_server.ps1) wird die Prozess-ID in `server.pid` hinterlegt.
   - [`stop_server.ps1`](../../stop_server.ps1) liest `server.pid` und beendet den Dienst sauber (`Stop-Process`).

@@ -89,10 +89,11 @@ HTTP-Aufrufe an das BOKU-Backend sind gegen transiente Netzwerkfehler abgesicher
 
 ## 5. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
 
-Die 16 Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab:
+Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab und sichern die Schnittstellenverträge vor Refactorings:
 
 | Test-Suite | Testfokus & Schutzbereich |
 | :--- | :--- |
+| `test_characterization_endpoints.py` | Charakterisierungssuite für öffentliche Schnittstellenverträge (`GET /health`, `GET /internal/cost-status`, `GET /v1/models`, `POST /v1/chat/completions`) mittels `fastapi.testclient.TestClient`. |
 | `test_tool_emulation.py` | Extraktion von ```json ... ``` Blöcken, Reparatur von unvollständigen JSON-Objekten. |
 | `test_multi_step_tool_emulation.py` | Mehrstufige Handoffs: Tool Call → Result → Next Call → Final Answer. |
 | `test_post_tool_guard.py` | Verhindert Endlosschleifen nach Tool-Fehlern oder phantomhaften Folgeaufrufen. |
@@ -100,5 +101,10 @@ Die 16 Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristi
 | `test_hardening_security_runtime.py` | Schutz gegen Klartext-Leakage, Insecure Key Detection, Mail-Destruction Guard. |
 | `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
 | `test_skill_snippets.py` | Dynamisches Self-Learning und Topic-Matching für Tool-Empfehlungen. |
-| `run_local_tests.ps1` | E2E-Lauf: Startet Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
+| `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
+
+### Sicherheits-Baselines der Testumgebung
+- **Test-Discovery-Scope (`pytest.ini`):** Über `testpaths = tests` wird Pytest angewiesen, Tests ausschließlich im Verzeichnis `tests/` zu suchen. Dadurch werden Diagnose- und Connectivity-Skripte im Root-Verzeichnis (wie `test_models_connectivity.py`) von der Testausführung ausgeschlossen.
+- **Test-Port-Isolation (`tests/_local_env.py`):** Als Fallback für `ACADEMICAI_TEST_BASE_URL` ist Port `11436` (`http://127.0.0.1:11436`) vorkonfiguriert. Dies verhindert versehentliche Netzwerkaufrufe gegen eine parallel laufende produktive Instanz auf Port `11435`, falls Umgebungsvariablen nicht explizit gesetzt sind.
+
 

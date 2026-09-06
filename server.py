@@ -394,6 +394,13 @@ def _validate_proxy_api_key(api_key: str) -> str:
 
 API_KEY = _validate_proxy_api_key(API_KEY)
 
+ALLOWED_MODELS = [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-5",
+    "gpt-5-mini",
+]
+
 # Proxy-Defaults (nur wenn Client keinen Wert setzt)
 DEFAULT_CHAT_TEMPERATURE = float(os.environ.get("ACADEMICAI_DEFAULT_CHAT_TEMPERATURE", "0.6"))
 DEFAULT_TOOL_TEMPERATURE = float(os.environ.get("ACADEMICAI_DEFAULT_TOOL_TEMPERATURE", "0.1"))

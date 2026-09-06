@@ -107,5 +107,7 @@ In `skill_snippets.json` persistierte Heuristik-Tipps:
 | `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` | `int` (Default: `100000`) | Max. Zeichenlänge pro Tool-JSON-Schema (Schutzgrenze 413) |
 | `ACADEMICAI_MAX_REQUEST_JSON_CHARS` | `int` (Default: `2000000`) | Max. Gesamtgröße des Request-JSON-Strings (Schutzgrenze 413) |
 | `ACADEMICAI_RATE_LIMIT_PER_MINUTE` | `int` (Default: `120`) | Max. Anfragen pro Minute pro IP/Token-Bucket (Schutzgrenze 429) |
+| `ACADEMICAI_TEST_BASE_URL` | `str` (Default: `http://127.0.0.1:11436`) | Test-Fallback-URL in `tests/_local_env.py` zur Port-Isolation |
+| `server.ALLOWED_MODELS` | `list[str]` | Modellkonstante (`["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"]`) für Verträge & Discovery |
 | `server.pid` | File (`int`) | Prozess-ID des laufenden Proxy-Daemons |
 | `server.log` | File | Aktiver Log-Stream mit täglicher Rotation (30 Tage Retention) |
