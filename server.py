@@ -67,14 +67,16 @@ from academicai.request_guards import (
     _rate_limit_buckets,
     _rate_limit_lock,
 )
-
-
-def _last_user_text(messages: list) -> str:
-    """Liefert den letzten User-Text aus den Original-Messages."""
-    for m in reversed(messages or []):
-        if m.get("role") == "user":
-            return _extract_text_content(m.get("content"))
-    return ""
+from academicai.humanization import (
+    build_humanization_messages,
+    _build_humanization_messages,
+    is_human_readable_target,
+    _is_human_readable_target,
+    last_user_text,
+    _last_user_text,
+    run_humanization_pass,
+    _run_humanization_pass,
+)
 
 
 def _apply_post_tool_guard(messages: list, has_tools: bool) -> list:
@@ -109,62 +111,6 @@ def _apply_post_tool_guard(messages: list, has_tools: bool) -> list:
 
     return [{"role": "system", "content": guard_text}] + messages
 
-
-def _is_human_readable_target(messages: list) -> bool:
-    """
-    Heuristik: Nur bei menschlichen Zielkanälen JSON->Human-Text-Fallback aktivieren.
-
-    False für klar maschinelle Runs (z.B. cron).
-    True für typische Human-Channels (whatsapp/telegram/signal/discord/slack/webchat...).
-    """
-    user_text = "\n".join(
-        _extract_text_content(m.get("content"))
-        for m in messages
-        if m.get("role") == "user"
-    ).lower()
-
-    # Explizit maschineller Trigger
-    if "[cron:" in user_text:
-        return False
-
-    # Chat-Metadaten aus OpenClaw-User-Envelope (auch ohne system channel marker)
-    user_human_markers = [
-        "conversation info (untrusted metadata)",
-        '"is_group_chat": true',
-        '"is_group_chat": false',
-        '"conversation_label":',
-        '"sender": "+',
-    ]
-    if any(marker in user_text for marker in user_human_markers):
-        return True
-
-    system_text = "\n".join(
-        _extract_text_content(m.get("content"))
-        for m in messages
-        if m.get("role") == "system"
-    ).lower()
-
-    human_channel_markers = [
-        "channel=whatsapp", '"channel": "whatsapp"',
-        "channel=telegram", '"channel": "telegram"',
-        "channel=signal", '"channel": "signal"',
-        "channel=imessage", '"channel": "imessage"',
-        "channel=discord", '"channel": "discord"',
-        "channel=slack", '"channel": "slack"',
-        "channel=googlechat", '"channel": "googlechat"',
-        "channel=irc", '"channel": "irc"',
-        "channel=webchat", '"channel": "webchat"',
-        '"chat_type": "group"', '"chat_type": "direct"',
-    ]
-    if any(marker in system_text for marker in human_channel_markers):
-        return True
-
-    # OpenClaw-Session ohne explizite Channel-Marker -> für Nutzer standardmäßig als human behandeln
-    if "you are a personal assistant running inside openclaw." in system_text:
-        return True
-
-    # Sonst eher API-/Maschinenverkehr
-    return False
 
 # --- Config ---
 from academicai.config import (
@@ -241,44 +187,6 @@ from academicai.runtime import (
     _check_backend_health,
     get_health_payload,
 )
-
-
-def _build_humanization_messages(original_user_query: str, structured_content: str) -> list:
-    """Prompt für den optionalen zweiten LLM-Pass (Humanisierung)."""
-    system_msg = {
-        "role": "system",
-        "content": (
-            "You rewrite structured tool output into a natural final answer for a human chat. "
-            "Return only the final answer text for the user. "
-            "Do NOT include JSON, code blocks, field names, metadata, or debug info."
-        ),
-    }
-    user_msg = {
-        "role": "user",
-        "content": (
-            f"Original user question:\n{original_user_query.strip() or '-'}\n\n"
-            f"Structured/tool-derived result:\n{structured_content.strip()}\n\n"
-            "Task: Write a concise, natural-language final reply for the user."
-        ),
-    }
-    return [system_msg, user_msg]
-
-
-async def _run_humanization_pass(model: str, original_user_query: str, structured_content: str) -> Optional[str]:
-    """Führt optionalen zweiten LLM-Pass aus und liefert finalen Text zurück."""
-    try:
-        human_model = HUMANIZATION_MODEL or model
-        resp = await run_in_threadpool(
-            academicai.completion,
-            model=human_model,
-            messages=_build_humanization_messages(original_user_query, structured_content),
-            temperature=HUMANIZATION_TEMPERATURE,
-        )
-        text = (resp.choices[0].message.content or "").strip()
-        return text or None
-    except Exception as e:
-        log.warning(f"humanization pass failed, fallback to first-pass content: {e}")
-        return None
 
 # --- Logging Setup (Delegated to academicai.logging_config) ---
 from academicai.logging_config import (

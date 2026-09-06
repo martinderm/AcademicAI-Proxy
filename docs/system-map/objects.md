@@ -289,4 +289,40 @@ Das Modul [`academicai/logging_config.py`](../../academicai/logging_config.py) k
 - **Server-Rückwärtskompatibilität:**
   - `server.py` re-exportiert `log`, `log_formatter`, `info_handler`, `error_handler`, `console_handler`, `root_logger`, `configure_logging`, `get_logger`, `close_handlers`, `log_file_path`, `err_file_path`.
 
+---
+
+## 9. Humanization & Zielkanal-Klassifizierung ([`academicai/humanization.py`](../../academicai/humanization.py))
+
+Das Modul [`academicai/humanization.py`](../../academicai/humanization.py) kapselt Heuristiken zur Unterscheidung menschlicher Chat-Kanäle von maschinellen API-Aufrufen, die Extraktion des letzten User-Prompts, die Konstruktion von Prompts für den zweiten LLM-Pass und die asynchrone Ausführung des Humanisierungs-Passes:
+
+### Zielkanal-Erkennung (`is_human_readable_target`, `_is_human_readable_target`)
+- **Heuristische Kanal-Klassifizierung:**
+  - Erkennt typische Messenger- und Chat-Kanäle im System-Kontext (`whatsapp`, `telegram`, `signal`, `imessage`, `discord`, `slack`, `googlechat`, `irc`, `webchat`, sowie Gruppen-/Direktchat-Typen).
+  - Erkennt OpenClaw-spezifische User-Envelopes mit Metadaten (`conversation info (untrusted metadata)`, `"is_group_chat": true/false`, `"conversation_label":`, `"sender": "+..."`) oder Standard-Session-Prompts (`you are a personal assistant running inside openclaw.`).
+- **Maschinen-Trigger-Ausschluss:**
+  - Schließt maschinelle Jobs (z.B. automatisierte Cron-Trigger `[cron:...`) explizit aus (`False`), selbst wenn Messenger-Marker im System-Prompt vorhanden sind.
+
+### User-Text-Extraktion (`last_user_text`, `_last_user_text`)
+- Durchsucht die Nachrichten-Historie rückwärts nach der letzten Nachricht mit `role == "user"`.
+- Verwendet `extract_text_content` aus [`academicai/request_guards.py`](../../academicai/request_guards.py) zur robusten Extraktion sowohl aus Plain-Strings als auch aus Multi-Part-/Dict-Strukturen.
+
+### Prompt-Konstruktion (`build_humanization_messages`, `_build_humanization_messages`)
+- Baut eine 2-Turn-Nachrichtenliste für den optionalen zweiten LLM-Pass:
+  - `system`: Klare Instruktion, strukturierte Tool-Ergebnisse in natürliche, fließende Antworten ohne JSON, Codeblöcke, Feldnamen oder Debug-Metadaten umzuformulieren.
+  - `user`: Enthält die ursprüngliche Benutzerfrage (`Original user question`) und das strukturierte Werkzeugergebnis (`Structured/tool-derived result`) mit Fallback auf `"-"` bei leeren Eingaben.
+
+### Asynchrone Pass-Ausführung (`run_humanization_pass`, `_run_humanization_pass`)
+- Führt den zweiten Pass asynchron via `run_in_threadpool` über die `completion`-Funktion aus.
+- Unterstützt sowohl synchrone Callables als auch asynchrone Coroutine-Funktionen.
+- Robustes Logging und Fallback: Fängt Laufzeitfehler ab, protokolliert Warnungen (`log.warning`) und liefert `None` zurück (Fallback auf First-Pass-Inhalt).
+- Behandelt leere Antworten oder Whitespace-Only-Strings fehlertolerant durch Rückgabe von `None`.
+
+### Dynamische Attributauflösung & Rückwärtskompatibilität
+- **Dynamische Konfiguration:**
+  - Prüft Attribute auf dem `server`-Modul (`HUMANIZATION_MODEL`, `HUMANIZATION_TEMPERATURE`, `academicai.completion`) vor dem Fallback auf `academicai.config` bzw. `academicai.completion`.
+  - Stellt sicher, dass bestehende Test-Suiten mit `monkeypatch.setattr(server, ...)` ohne Anpassung funktionieren.
+- **Server- und Package-Re-Exports:**
+  - `server.py` und `academicai/__init__.py` exportieren alle 8 Funktionen und Aliase (`build_humanization_messages`, `_build_humanization_messages`, `is_human_readable_target`, `_is_human_readable_target`, `last_user_text`, `_last_user_text`, `run_humanization_pass`, `_run_humanization_pass`).
+
+
 

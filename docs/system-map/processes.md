@@ -24,9 +24,9 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
     └─ Token-Bucket Rate-Limiting mit periodischem TTL-Sweep (academicai/request_guards.py) vs. RATE_LIMIT_PER_MINUTE / RATE_LIMIT_WINDOW_SECONDS (429)
        │
        ▼
- 3. Message-Normalisierung & Heuristiken:
-    ├─ _extract_text_content (Plain-Text-Extraktion)
-    ├─ _is_human_readable_target (Human Channel vs. Cron)
+ 3. Message-Normalisierung & Heuristiken (academicai/humanization.py & request_guards.py):
+    ├─ last_user_text & extract_text_content (Plain-Text-Extraktion)
+    ├─ is_human_readable_target (Human Channel vs. Cron)
     └─ _apply_post_tool_guard (Fehler-Schutz nach Tool-Result)
        │
        ▼
@@ -42,7 +42,11 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`server.py`
     └─ parse_tool_calls (Extraktion von ```json ... ``` Calls)
        │
        ▼
- 7. Response-Formatierung:
+ 7. Humanisierung & Response-Glättung (academicai/humanization.py):
+    └─ Optionaler 2. LLM-Pass (run_humanization_pass / build_humanization_messages) bei ENABLE_HUMANIZATION_PASS auf Human-Kanälen
+       │
+       ▼
+ 8. Response-Formatierung:
     ├─ Streaming: SSE-Chunk-Generator (build_tool_calls_sse_chunks)
     └─ Non-Streaming: JSON Response (build_tool_calls_response)
        │
@@ -65,7 +69,7 @@ Da das BOKU-Backend native Tool-Calling-Felder ignoriert, nutzt der Proxy eine s
 4. **JSON-Repair & Extraktion (`parse_tool_calls`, `_repair_and_load_json`):**  
    Entfernt Trailing Commas, repariert unescapte Steuerzeichen/Newlines via `strict=False`, korrigiert Backslash-Escapes und isoliert `tool_call` bzw. `tool_calls` Payloads.
 5. **Fallback-Handling:**  
-   Falls das Modell JSON ausgibt, obwohl ein Mensch im Chat sitzt (`_is_human_readable_target`), formatiert [`format_arbitrary_json_for_humans`](../../academicai/tool_emulation.py) das JSON in lesbaren Fließtext um.
+   Falls das Modell JSON ausgibt, obwohl ein Mensch im Chat sitzt ([`is_human_readable_target`](../../academicai/humanization.py)), formatiert [`format_arbitrary_json_for_humans`](../../academicai/tool_emulation.py) das JSON in lesbaren Fließtext um.
 
 ---
 
@@ -146,7 +150,24 @@ Das Logging-Subsystem wird zentral über `configure_logging()` orchestriert:
 
 ---
 
-## 8. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
+## 8. Humanization Flow & Zweiter Pass ([`academicai/humanization.py`](../../academicai/humanization.py))
+
+Verwandelt strukturierte Tool-Ausgaben für menschliche Chat-Kanäle in natürliche Konversationstexte:
+
+1. **Zielkanal-Klassifizierung (`is_human_readable_target`):**
+   - Prüft System-Prompts auf bekannte Messenger- und Chat-Tags (`channel=whatsapp`, `telegram`, `signal`, `discord`, `slack` etc.) sowie OpenClaw-Metadaten (`conversation info`, `is_group_chat`, `sender`).
+   - Maschinen-Override: Enthält die Benutzeranfrage ein Cron-Präfix (`[cron:`), wird Humanisierung strikt unterdrückt (`False`).
+2. **User-Query-Extraktion (`last_user_text`):**
+   - Extrahiert die letzte Benutzeranfrage aus der Historie (unterstützt Plain-String und strukturierte Content-Parts via `extract_text_content`).
+3. **Zweiter LLM-Pass (`run_humanization_pass`, `build_humanization_messages`):**
+   - Bei aktiver Humanisierung (`ENABLE_HUMANIZATION_PASS=True`) und erkanntem Human-Kanal:
+   - Erstellt einen dedizierten Prompt (`build_humanization_messages`), der das Modell anweist, strukturierte JSON-/Tool-Ergebnisse in eine prägnante, natürliche Antwort ohne Metadaten oder Codeblöcke umzuschreiben.
+   - Führt den Request asynchron über `run_in_threadpool(completion, ...)` aus (unterstützt synchrone und asynchrone Callables).
+   - Bei Fehlern oder leerer Rückgabe erfolgt ein fehlertoleranter Fallback auf die First-Pass-Antwort.
+
+---
+
+## 9. Test- & Regressionsarchitektur ([`tests/`](../../tests/))
 
 Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken ab und sichern die Schnittstellenverträge vor Refactorings:
 
@@ -157,7 +178,7 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_tool_emulation_unit.py` | Unit-Tests für TypeScript-Style Tool-Signaturen, hard `tool_choice` Enforcement, JSON-Repair Sanitization (Trailing Commas, Escapes) und `<tool_result>` XML-Tags. |
 | `test_multi_step_tool_emulation.py` | Mehrstufige Handoffs: Tool Call → Result → Next Call → Final Answer. |
 | `test_post_tool_guard.py` | Verhindert Endlosschleifen nach Tool-Fehlern oder phantomhaften Folgeaufrufen. |
-| `test_humanization_flow.py` | Erkennung menschlicher Chat-Kanäle (WhatsApp/Telegram) vs. maschineller JSON-Fallback. |
+| `test_humanization_flow.py` | Unit- & Integrationstests für `academicai/humanization.py`: Zielkanal-Erkennung (`is_human_readable_target`: Messenger/OpenClaw vs. Cron-Override), User-Text-Extraktion (`last_user_text`: String, Multi-Part, Fallbacks), Prompt-Konstruktion (`build_humanization_messages`), Pass-Ausführung (`run_humanization_pass`: Erfolg, Fehler-Fallback, Empty-Content, Async-Callables) sowie Chat-Endpoint-Integration (`ENABLE_HUMANIZATION_PASS` Toggle). |
 | `test_hardening_security_runtime.py` | Schutz gegen Klartext-Leakage, Insecure Key Detection, Request-Guards & Payload-Limits. |
 | `test_transformation_sticky_system.py` | Korrektes Prependen von System-Prompts an erste User-Message (Azure Prefix Caching). |
 | `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |

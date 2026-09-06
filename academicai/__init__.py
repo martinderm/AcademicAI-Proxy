@@ -106,6 +106,16 @@ from .logging_config import (  # noqa: F401
     console_handler,
     root_logger,
 )
+from .humanization import (  # noqa: F401
+    build_humanization_messages,
+    _build_humanization_messages,
+    is_human_readable_target,
+    _is_human_readable_target,
+    last_user_text,
+    _last_user_text,
+    run_humanization_pass,
+    _run_humanization_pass,
+)
 
 __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
@@ -133,6 +143,10 @@ __all__ = [
     "configure_logging", "get_logger", "close_handlers",
     "log", "log_formatter", "info_handler", "error_handler",
     "console_handler", "root_logger",
+    "build_humanization_messages", "_build_humanization_messages",
+    "is_human_readable_target", "_is_human_readable_target",
+    "last_user_text", "_last_user_text",
+    "run_humanization_pass", "_run_humanization_pass",
 ]
 
 
