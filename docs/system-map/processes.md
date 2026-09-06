@@ -83,6 +83,9 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`academicai
 
 ## 2. Tool-Emulation Pipeline ([`academicai/tool_emulation.py`](../../academicai/tool_emulation.py))
 
+> Detailliertes Architektur- und Entwurfskonzept: [`../architecture/concept-tool-emulation.md`](../architecture/concept-tool-emulation.md)  
+> *Hinweis:* Die Kernheuristiken der Tool-Emulation wurden während der Modularisierung nicht verhaltensändernd modifiziert.
+
 Da das BOKU-Backend native Tool-Calling-Felder ignoriert, nutzt der Proxy eine synthetische Emulation:
 
 1. **High-Density TypeScript Signatures (`_compact_tool_def`):**  
