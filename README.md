@@ -8,11 +8,13 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 - Chat completions: ✅
 - Model list endpoint: ✅
 - Health endpoint: ✅
-- Tool-call emulation (JSON-mode): ✅
+- Cost status endpoint: ✅
+- Tool-call emulation (JSON-mode with TypeScript signatures & JSON repair): ✅
 - SSE-style streaming emulation: ✅
 - Daily Log Rotation (30 days retention): ✅
 - E2E Test Port Isolation (runs on port 11436): ✅
-- Automatic Prompt Caching Compatibility: ✅
+- Automatic Prompt Caching Compatibility (Azure prefix caching): ✅
+- Modular Domain Architecture & Modern ASGI Lifespan (`academicai.app`): ✅
 
 ### Caching and Costs Status
 
@@ -64,6 +66,7 @@ While reliable for everyday agent tasks, emulating function calling over a text-
 ## Endpoints
 
 - `GET /health`
+- `GET /internal/cost-status` (cost snapshot)
 - `GET /v1/models`
 - `POST /v1/chat/completions`
 
@@ -86,7 +89,6 @@ Startup fails fast when `ACADEMICAI_PROXY_API_KEY` is missing, insecure, or too 
 Keep repository content generic. Put tenant-specific values outside the repository:
 
 - `.env` with endpoint, client ID/secret, proxy API key
-- optional tenant snippets file via `ACADEMICAI_SKILL_SNIPPETS_FILE`
 
 Templates are provided under `docs/tenant-template/`.
 
@@ -233,57 +235,6 @@ Env flags:
 - `ACADEMICAI_HUMANIZATION_MODEL=<optional override>` (default: same model)
 - `ACADEMICAI_HUMANIZATION_TEMPERATURE=0.2`
 
-### Optional skill snippet injection (tool-call reliability)
-
-You can enable retrieval-based skill snippets that are injected as short system context
-before tool-emulation. This increases the chance of correct tool use for domain intents
-(e.g. mailbox/email -> Himalaya wrapper commands).
-
-> [!IMPORTANT]
-> **Recommendation for modern harnesses (e.g. GitHub Copilot)**:
-> It is highly recommended to **disable** both skill snippets and self-learning for developer-centric setups.
-> Modern clients like GitHub Copilot manage workspace guidelines natively (e.g., via `.github/copilot-instructions.md` inside your workspace) and provide detailed, context-aware tool schemas automatically. 
-> Enabling proxy-side snippet injection or auto-learning in a Copilot environment is redundant, adds unnecessary maintenance overhead, and pollutes the system prompt with generic keyword noise.
-
-Env flags:
-
-- `ACADEMICAI_ENABLE_SKILL_SNIPPETS=true|false` (default: `false`, recommended `false` for Copilot)
-- `ACADEMICAI_SKILL_SNIPPETS_FILE=./data/skill_snippets.json`
-- `ACADEMICAI_SKILL_SNIPPETS_MAX=1`
-
-Setup note:
-
-- `./data/skill_snippets.json` is **installation-specific runtime data** (especially if auto-learning is enabled) and is **not committed**.
-- To bootstrap, copy `./skill_snippets.example.json` → `./data/skill_snippets.json` (or point `ACADEMICAI_SKILL_SNIPPETS_FILE` to your own location).
-
-Notes:
-
-- Injection runs only in tool mode (`tools`/`functions` present).
-- Snippets are selected by topic match against the latest user message.
-
-### Optional self-learning snippet updates (variant 1, keyword-based)
-
-The proxy can auto-update the *runtime* snippets file (default: `./data/skill_snippets.json`) from successful tool-call decisions.
-This is intentionally simple (no vector DB / no embeddings):
-
-- derive keywords from the latest user request
-- upsert `auto:<tool_name>` snippets
-- increase hit counters and extend topics over time
-
-> [!WARNING]
-> Keep `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=false` (default). Naive keyword extraction can easily associate common words (like "please", "run") with unrelated tools, diluting the LLM's system context on future turns.
-
-Env flags:
-
-- `ACADEMICAI_ENABLE_AUTO_SKILL_LEARNING=true|false` (default: `false`)
-- `ACADEMICAI_AUTO_SKILL_TOPICS_PER_CALL=6`
-- `ACADEMICAI_AUTO_SKILL_MIN_TOPIC_LEN=4`
-
-Notes:
-
-- Learning runs only when tool mode is active and a tool call was actually emitted.
-- Existing manual snippets are preserved; auto snippets are marked with `source: "auto"`.
-
 ### Optional cost monitoring (currently untested in this repo setup)
 
 Cost monitoring is **disabled by default** and does nothing unless explicitly enabled.
@@ -336,19 +287,6 @@ answer and discourages unnecessary additional tool calls.
 This reduces accidental re-tooling loops while still allowing another tool call
 if the latest tool result is clearly incomplete.
 
-### Mail-delete safety guard (write-before-delete)
-
-For mailbox workflows, the proxy enforces this batch rule:
-
-- `exec` calls containing `message delete` or any `message move ...`
-  are allowed only if a prior `write` or `edit` call exists in the same
-  tool-call batch.
-
-If such a delete/move is blocked and no safe tool call remains, the proxy returns
-plain text:
-
-- `Blocked unsafe mail action: message delete/move requires a prior write/edit in the same tool-call batch.`
-
 ## Tests
 
 Run smoke + functional tests:
@@ -368,20 +306,32 @@ py tests/test_openclaw_style.py
 
 ## Project layout
 
-```
+```text
 academicai-proxy/
   academicai/
     __init__.py
-    auth.py
-    errors.py
-    provider.py
-    tool_emulation.py
-    transformation.py
-  server.py
-  start_server.ps1
-  tests/
-    test_tool_emulation.py
-    ...
+    app.py               # FastAPI application factory & ASGI lifespan
+    auth.py              # BOKU authentication & header injection
+    config.py            # Typed settings & environment parsing
+    cost_monitoring.py   # Atomic cache & cost status
+    errors.py            # Standardized OpenAI error mapping
+    humanization.py      # Target channel detection & 2nd-pass rewriting
+    logging_config.py    # Rotating file handlers & uvicorn wiring
+    provider.py          # HTTP transport to BOKU backend
+    request_guards.py    # Inbound payload validation & rate limiting
+    runtime.py           # Process lifecycle & backend health checks
+    tool_emulation.py    # TypeScript signatures, repair & post-guard
+    transformation.py    # Message role normalization & text extraction SSOT
+  docs/
+    architecture/        # Concept & modularization architecture docs
+    archive/             # Legacy archive artifacts
+    system-map/          # ICM-aligned agent architecture map
+    tenant-template/     # Environment templates
+  server.py              # Slim CLI runner & compatibility layer
+  start_server.ps1       # Controlled service startup
+  stop_server.ps1        # Controlled service shutdown
+  run_local_tests.ps1    # Offline and E2E test runner
+  tests/                 # Comprehensive test suite (175+ tests)
   requirements.txt
   README.md
 ```
