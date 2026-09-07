@@ -9,11 +9,11 @@
 
 | Ziel | Protokoll | Zweck | Auth & Secrets |
 | :--- | :--- | :--- | :--- |
-| **BOKU AcademicAI Backend** | HTTPS (REST) | Ausführung der Chat-Completions | `X-Client-ID`, `X-Client-Secret` im Header |
-| **Azure OpenAI Infrastructure** | HTTPS (via BOKU) | Prefix Caching & Inference | Indirekt über BOKU-Routing |
+| **AcademicAI Backend** | HTTPS (REST) | Ausführung der Chat-Completions | `X-Client-ID`, `X-Client-Secret` im Header |
+| **Azure OpenAI Infrastructure** | HTTPS (via AcademicAI) | Prefix Caching & Inference | Indirekt über AcademicAI-Routing |
 
 - **Timeout:** 120 Sekunden Standard-Timeout via `httpx.AsyncClient`.
-- **Fehlerbehandlung:** HTTP 401/403/500 des BOKU-Backends werden in standardisierte OpenAI-Error-JSON-Payloads übersetzt ([`academicai/errors.py`](../../academicai/errors.py)).
+- **Fehlerbehandlung:** HTTP 401/403/500 des AcademicAI-Backends werden in standardisierte OpenAI-Error-JSON-Payloads übersetzt ([`academicai/errors.py`](../../academicai/errors.py)).
 
 ---
 

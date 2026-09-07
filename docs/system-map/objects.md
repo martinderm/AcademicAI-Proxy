@@ -35,9 +35,9 @@ Liefert verfügbare Modelle als OpenAI ModelList:
 
 ---
 
-## 2. Outbound Backend Schemas (Proxy $\to$ BOKU AcademicAI)
+## 2. Outbound Backend Schemas (Proxy $\to$ AcademicAI)
 
-Das BOKU-Backend verlangt spezifische Auth-Header und REST-Strukturen ([`academicai/auth.py`](../../academicai/auth.py)):
+Das AcademicAI-Backend verlangt spezifische Auth-Header und REST-Strukturen ([`academicai/auth.py`](../../academicai/auth.py)):
 - **Headers**:
   - `X-Client-ID`: Client-ID aus Umgebungsvariable `ACADEMICAI_CLIENT_ID`.
   - `X-Client-Secret`: Secret aus `ACADEMICAI_CLIENT_SECRET`.
@@ -50,9 +50,9 @@ Das BOKU-Backend verlangt spezifische Auth-Header und REST-Strukturen ([`academi
 ## 3. Emulations- & Transformationsobjekte
 
 ### Message-Rollen-Normalisierung ([`academicai/transformation.py`](../../academicai/transformation.py))
-Das BOKU-Backend unterstützt ausschließlich die Rollen **`user`** und **`assistant`**. Eingehende OpenAI-Rollen werden daher deterministisch transformiert:
+Das AcademicAI-Backend unterstützt ausschließlich die Rollen **`user`** und **`assistant`**. Eingehende OpenAI-Rollen werden daher deterministisch transformiert:
 
-| Eingehende OpenAI-Rolle | Zielrolle am BOKU-Backend | Transformationsregel |
+| Eingehende OpenAI-Rolle | Zielrolle am AcademicAI-Backend | Transformationsregel |
 | :--- | :--- | :--- |
 | `system` | `user` | Inhalt wird an den Beginn der allerersten `user`-Message eingefügt (Sticky System Message / Azure Prefix Caching). |
 | `tool` | `user` | Standardisiertes Observation-Tag: `<tool_result id="<tool_call_id>" name="<tool_name>">\n<content>\n</tool_result>` (Attribute werden bei Fehlen weggelassen). |
@@ -115,9 +115,9 @@ Das Modul [`academicai/config.py`](../../academicai/config.py) ist die zentrale 
 | :--- | :--- | :--- | :--- | :--- |
 | `PORT` | `ACADEMICAI_PROXY_PORT` | `int` | `11435` | Live-Listen-Port für eingehende Client-Requests |
 | `API_KEY` | `ACADEMICAI_PROXY_API_KEY` | `str (Secret)` | `"test-proxy-key-123456"` | Bearer Token für Client-Authentifizierung am Proxy |
-| `BASE_URL` | `ACADEMICAI_BASE_URL` | `str` | `"https://academic-ai.boku.ac.at/api/v1"` | BOKU AcademicAI API-Basis-URL |
-| `CLIENT_ID` | `ACADEMICAI_CLIENT_ID` | `str (Secret)` | `""` | BOKU Backend API Client ID |
-| `CLIENT_SECRET` | `ACADEMICAI_CLIENT_SECRET` | `str (Secret)` | `""` | BOKU Backend API Client Secret |
+| `BASE_URL` | `ACADEMICAI_BASE_URL` | `str` | `"https://academic-ai.boku.ac.at/api/v1"` | AcademicAI API-Basis-URL |
+| `CLIENT_ID` | `ACADEMICAI_CLIENT_ID` | `str (Secret)` | `""` | AcademicAI Backend API Client ID |
+| `CLIENT_SECRET` | `ACADEMICAI_CLIENT_SECRET` | `str (Secret)` | `""` | AcademicAI Backend API Client Secret |
 | `HEALTH_CHECK_BACKEND` | `ACADEMICAI_HEALTH_CHECK_BACKEND` | `bool` | `True` | Aktiviert Backend-Connectivity-Check in `/health` |
 | `HEALTH_CHECK_TIMEOUT_SECONDS` | `ACADEMICAI_HEALTH_CHECK_TIMEOUT_SECONDS` | `float` | `2.0` | Timeout für Backend-Health-Check |
 | `ENABLE_COST_MONITORING` | `ACADEMICAI_ENABLE_COST_MONITORING` | `bool` | `True` | Schaltet Cost-Header & Monitoring aktiv |
@@ -176,7 +176,7 @@ Das Modul [`academicai/request_guards.py`](../../academicai/request_guards.py) k
 
 ## 6. Cost-Monitoring & Cache-Lifecycle ([`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py))
 
-Das Modul [`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py) kapselt die Kostenüberwachung des BOKU-Backends, das lokale Datei-Caching sowie die Generierung von Kosten-Headern.
+Das Modul [`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py) kapselt die Kostenüberwachung des AcademicAI-Backends, das lokale Datei-Caching sowie die Generierung von Kosten-Headern.
 
 ### Lokales Caching & atomare Datei-Operationen
 - **Atomares Schreiben (`write_cost_cache`):**
@@ -232,7 +232,7 @@ Das Modul [`academicai/runtime.py`](../../academicai/runtime.py) kapselt Lifecyc
   - Ignoriert nicht existierende Dateien fehlertolerant.
 
 ### Backend-Connectivity Health Checks (`check_backend_health`)
-- Führt bei aktiviertem Check (`HEALTH_CHECK_BACKEND=True`) einen synchronen HTTP-GET-Aufruf gegen den BOKU-Endpunkt `/api/v1/llm/models` via `httpx.Client` aus (Timeout konfiguriert über `HEALTH_CHECK_TIMEOUT_SECONDS`, Default: 2.0s).
+- Führt bei aktiviertem Check (`HEALTH_CHECK_BACKEND=True`) einen synchronen HTTP-GET-Aufruf gegen den AcademicAI-Endpunkt `/api/v1/llm/models` via `httpx.Client` aus (Timeout konfiguriert über `HEALTH_CHECK_TIMEOUT_SECONDS`, Default: 2.0s).
 - Misst die Latenz via `time.perf_counter()` in Millisekunden (`latency_ms`).
 - Liefert ein strukturiertes Ergebnis-Dictionary zurück:
   - Bei Erfolg (HTTP 200): `{"enabled": True, "ok": True, "status_code": 200, "latency_ms": <int>}`

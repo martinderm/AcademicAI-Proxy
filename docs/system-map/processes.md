@@ -59,7 +59,7 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`academicai
     └─ Wandelt JSON-Tools in System-Prompt-Instruktionen um
        │
        ▼
- 5. BOKU-Backend HTTP-Aufruf (academicai.provider)
+ 5. AcademicAI-Backend HTTP-Aufruf (academicai.provider)
     └─ Übertragung mit X-Client-ID / X-Client-Secret & Azure Prefix Cache
        │
        ▼
@@ -86,7 +86,7 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`academicai
 > Detailliertes Architektur- und Entwurfskonzept: [`../architecture/concept-tool-emulation.md`](../architecture/concept-tool-emulation.md)  
 > *Hinweis:* Die Kernheuristiken der Tool-Emulation wurden während der Modularisierung nicht verhaltensändernd modifiziert.
 
-Da das BOKU-Backend native Tool-Calling-Felder ignoriert, nutzt der Proxy eine synthetische Emulation:
+Da das AcademicAI-Backend native Tool-Calling-Felder ignoriert, nutzt der Proxy eine synthetische Emulation:
 
 1. **High-Density TypeScript Signatures (`_compact_tool_def`):**  
    Komprimiert Tool-Definitionen in einzeilige TypeScript-Signaturen mit Enums als Unions, getypten Arrays (`string[]`, `number[]`), Defaults und flachen Objekten (`filter?: {query, tags}`).
@@ -113,7 +113,7 @@ Verhindert Endlos-Schleifen oder falsche Erfolgsmeldungen:
 
 ## 4. Resilience & Retry-Schleife ([`academicai/provider.py`](../../academicai/provider.py))
 
-HTTP-Aufrufe an das BOKU-Backend sind gegen transiente Netzwerkfehler abgesichert:
+HTTP-Aufrufe an das AcademicAI-Backend sind gegen transiente Netzwerkfehler abgesichert:
 - **Retry-Limit:** `ACADEMICAI_RETRY_MAX` (Default: 2 Wiederholungen).
 - **Backoff:** Exponentielles Backoff (`RETRY_BASE_MS * 2^attempt`) bei HTTP 502/503/504 oder `httpx.TransportError`.
 - **Fast-Fail:** HTTP 401/403 bricht sofort ab (kein Retry bei Auth-Fehlern).
@@ -122,12 +122,12 @@ HTTP-Aufrufe an das BOKU-Backend sind gegen transiente Netzwerkfehler abgesicher
 
 ## 5. Cost-Monitoring & Lazy Cache Lifecycle ([`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py))
 
-Das Modul überwacht Kosten und Quoten des BOKU-Backends non-blocking:
+Das Modul überwacht Kosten und Quoten des AcademicAI-Backends non-blocking:
 1. **Cache Read & Stale Evaluation (`get_cost_cache_with_lazy_refresh`, `is_cost_cache_stale`):**
    - Eingehende Requests lesen den bestehenden Cache via `read_cost_cache`.
    - Ist der Cache älter als `COST_CACHE_TTL_SECONDS` (Default: 600s), wird ein asynchroner Refresh im Hintergrund angestoßen (`refresh_cost_cache_background`).
 2. **Asynchroner Live-Snapshot (`fetch_cost_snapshot`):**
-   - Ruft `GET /api/v1/cost/` am BOKU-Backend mit konfigurierten Credentials ab.
+   - Ruft `GET /api/v1/cost/` am AcademicAI-Backend mit konfigurierten Credentials ab.
    - Extrahiert `total_cost`, `total_clients` und `cost_entries` via `_extract_cost_summary`.
 3. **Atomares Schreiben (`write_cost_cache`):**
    - Schreibt den neuen Cache atomar (`tempfile` + `os.replace` mit Windows-Retry und `_cost_lock`), um Race Conditions zwischen parallelen Requests zu verhindern.
@@ -148,7 +148,7 @@ Verwaltet den Server-Daemon-Lifecycle und die Überwachung der Upstream-Verbindu
 3. **Health-Check-Workflow (`GET /health`):**
    - Ruft `_check_backend_health()` auf:
      - Prüft `HEALTH_CHECK_BACKEND`. Falls deaktiviert, Rückgabe von `{"enabled": False, "ok": None}`.
-     - Falls aktiviert: HTTP-GET auf BOKU `/api/v1/llm/models` mit Timeout `HEALTH_CHECK_TIMEOUT_SECONDS` und Auth-Headern.
+     - Falls aktiviert: HTTP-GET auf AcademicAI `/api/v1/llm/models` mit Timeout `HEALTH_CHECK_TIMEOUT_SECONDS` und Auth-Headern.
      - Ermittelt Antwortstatus und misst Request-Latenz via `time.perf_counter()`.
    - Übergibt das Ergebnis an `get_health_payload(backend)`:
      - Berechnet Gesamtstatus (`"ok"` bzw. `"degraded"` bei `enabled=True` und `ok=False`).

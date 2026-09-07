@@ -55,7 +55,7 @@ def test_custom_env_vars_override_defaults():
     custom_env = {
         "ACADEMICAI_PROXY_PORT": "12345",
         "ACADEMICAI_PROXY_API_KEY": "custom-secure-proxy-key-99999",
-        "ACADEMICAI_BASE_URL": "https://custom.boku.ac.at/v1",
+        "ACADEMICAI_BASE_URL": "https://custom.academicai.ac.at/v1",
         "ACADEMICAI_HEALTH_CHECK_BACKEND": "false",
         "ACADEMICAI_ENABLE_COST_MONITORING": "false",
         "ACADEMICAI_MAX_MESSAGES": "150",
@@ -77,7 +77,7 @@ def test_custom_env_vars_override_defaults():
 
     assert settings.PORT == 12345
     assert settings.API_KEY == "custom-secure-proxy-key-99999"
-    assert settings.BASE_URL == "https://custom.boku.ac.at/v1"
+    assert settings.BASE_URL == "https://custom.academicai.ac.at/v1"
     assert settings.HEALTH_CHECK_BACKEND is False
     assert settings.ENABLE_COST_MONITORING is False
     assert settings.MAX_MESSAGES == 150

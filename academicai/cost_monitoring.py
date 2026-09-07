@@ -2,7 +2,7 @@
 AcademicAI Cost Monitoring — Cache, API-Refresh und Header-Generierung.
 
 Kapselt:
-- Parsen von Kosten-Snapshots der BOKU-API
+- Parsen von Kosten-Snapshots der AcademicAI-API
 - Lokales Datei-Caching mit atomarem Schreiben und Verzeichnis-Erstellung
 - Stale-Erkennung und asynchrones / synchrones Cache-Refresh
 - Injektion von AcademicAI-Cost-Headern in HTTP-Responses

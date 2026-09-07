@@ -33,7 +33,7 @@
 - Skill snippet file brought back into sync with latest snippet schema.
 
 ### 📝 Documentation
-- README expanded with BOKU Cost API constraints, isolated port guidance, log rotation notes, and Copilot-centric Skill Snippet advice.
+- README expanded with AcademicAI Cost API constraints, isolated port guidance, log rotation notes, and Copilot-centric Skill Snippet advice.
 - Corrected default value of `ACADEMICAI_ENABLE_SKILL_SNIPPETS` (was incorrectly documented as `true`, default is `false`).
 
 ## 0.2.4 - 2026-03-06

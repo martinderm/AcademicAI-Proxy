@@ -1,6 +1,6 @@
 # AcademicAI Proxy
 
-OpenAI-compatible proxy for AcademicAI.
+OpenAI-compatible proxy for [AcademicAI](https://www.acomarket.at/de/portfolio/projekte/academic-ai) (die KI-Initiative für Österreichs Universitäten im Rahmen des ACOmarket-Portfolios).
 It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0.0.1:11435/v1`).
 
 ## Status
@@ -19,7 +19,7 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 ### Caching and Costs Status
 
 - **Automatic Prefix Caching**: ✅ Supported natively. The proxy is aligned to merge system instructions at the very beginning of the first user message, maximizing Azure OpenAI prefix cache hit rates.
-- **Cost/usage monitoring**: 🔴 (Disabled / Forbidden on the BOKU backend credentials - endpoint returns `403 Forbidden` due to tenant permissions).
+- **Cost/usage monitoring**: 🔴 (Disabled / Forbidden on the AcademicAI backend credentials - endpoint returns `403 Forbidden` due to tenant permissions).
 
 ## Why this proxy exists
 
@@ -44,7 +44,7 @@ So: good for practical use, but not mathematically deterministic.
 Users often observe that tool calling through this proxy feels surprisingly fast. This is driven by three specific architectural choices:
 
 1. **Azure OpenAI KV-Prefix Caching:**  
-   The proxy merges system instructions and tool definitions at the very beginning of the first user message. Because the BOKU backend runs on Azure OpenAI, stable prefix tokens (system context + tool signatures) trigger automatic KV-cache hits. This reduces Time-To-First-Token (TTFT) from seconds to milliseconds on repeated turns.
+   The proxy merges system instructions and tool definitions at the very beginning of the first user message. Because the AcademicAI backend runs on Azure OpenAI, stable prefix tokens (system context + tool signatures) trigger automatic KV-cache hits. This reduces Time-To-First-Token (TTFT) from seconds to milliseconds on repeated turns.
 2. **Single-Pass Minimal Output (JSON Mode):**  
    Instead of a two-pass router or conversational tool descriptions, the backend is invoked in `response_format: {type: "json_object"}`. Modern models produce minimal JSON without pleasantries (`{"action": "tool_call", ...}`), emitting only 25–40 tokens per call.
 3. **Zero Heavy Framework Overhead:**  
@@ -311,13 +311,13 @@ academicai-proxy/
   academicai/
     __init__.py
     app.py               # FastAPI application factory & ASGI lifespan
-    auth.py              # BOKU authentication & header injection
+    auth.py              # AcademicAI authentication & header injection
     config.py            # Typed settings & environment parsing
     cost_monitoring.py   # Atomic cache & cost status
     errors.py            # Standardized OpenAI error mapping
     humanization.py      # Target channel detection & 2nd-pass rewriting
     logging_config.py    # Rotating file handlers & uvicorn wiring
-    provider.py          # HTTP transport to BOKU backend
+    provider.py          # HTTP transport to AcademicAI backend
     request_guards.py    # Inbound payload validation & rate limiting
     runtime.py           # Process lifecycle & backend health checks
     tool_emulation.py    # TypeScript signatures, repair & post-guard

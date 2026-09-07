@@ -154,7 +154,7 @@ def test_check_backend_health_200_ok(monkeypatch):
     result = check_backend_health(
         enabled=True,
         timeout=1.0,
-        base_url="https://test.boku.ac.at",
+        base_url="https://test.academicai.ac.at",
         headers={"X-Client-ID": "test"},
     )
     assert result["enabled"] is True
@@ -171,7 +171,7 @@ def test_check_backend_health_non_200(monkeypatch):
 
     result = check_backend_health(
         enabled=True,
-        base_url="https://test.boku.ac.at",
+        base_url="https://test.academicai.ac.at",
     )
     assert result["enabled"] is True
     assert result["ok"] is False
@@ -186,7 +186,7 @@ def test_check_backend_health_exception(monkeypatch):
 
     result = check_backend_health(
         enabled=True,
-        base_url="https://test.boku.ac.at",
+        base_url="https://test.academicai.ac.at",
     )
     assert result["enabled"] is True
     assert result["ok"] is False
@@ -199,7 +199,7 @@ def test_check_backend_health_direct_client_injection():
     result = check_backend_health(
         enabled=True,
         client=mock_client,  # type: ignore
-        base_url="https://test.boku.ac.at",
+        base_url="https://test.academicai.ac.at",
     )
     assert result["enabled"] is True
     assert result["ok"] is True

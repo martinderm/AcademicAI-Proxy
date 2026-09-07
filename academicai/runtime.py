@@ -3,7 +3,7 @@ AcademicAI Runtime Lifecycle Helpers — PID-File Management und Backend Health 
 
 Kapselt:
 - Schreiben und Bereinigen von PID-Dateien mit Validierung
-- Backend-Connectivity Health Checks gegen BOKU /api/v1/llm/models mit Latenzmessung
+- Backend-Connectivity Health Checks gegen AcademicAI /api/v1/llm/models mit Latenzmessung
 - Erstellung standardisierter Health-Payloads für /health
 - Dynamische Konfigurationsauflösung über server / academicai.config
 """
@@ -94,7 +94,7 @@ def check_backend_health(
     client: Optional[httpx.Client] = None,
 ) -> dict[str, Any]:
     """
-    Führt einen Health Check gegen den BOKU-Endpunkt /api/v1/llm/models durch.
+    Führt einen Health Check gegen den AcademicAI-Endpunkt /api/v1/llm/models durch.
     Misst die Latenz und meldet Status bzw. Fehlermeldungen.
     """
     is_enabled = _get_setting("HEALTH_CHECK_BACKEND", enabled)
