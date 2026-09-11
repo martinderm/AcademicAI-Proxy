@@ -117,7 +117,21 @@ def configure_logging(
 
     log_formatter = logging.Formatter(LOG_FORMAT)
 
-    info_h = TimedRotatingFileHandler(
+    class SafeTimedRotatingFileHandler(TimedRotatingFileHandler):
+        """
+        Windows-sicherer TimedRotatingFileHandler.
+        Unter Windows scheitert os.rename beim Rollover mit PermissionError (WinError 32),
+        wenn ein anderer Prozess (z.B. laufender Server oder paralleler Test) die Datei geöffnet hält.
+        Dieser Handler fängt PermissionError/OSError beim rotate() ab.
+        """
+
+        def rotate(self, source: str, dest: str) -> None:
+            try:
+                super().rotate(source, dest)
+            except (PermissionError, OSError):
+                pass
+
+    info_h = SafeTimedRotatingFileHandler(
         str(log_path),
         when="D",
         interval=1,
@@ -127,7 +141,7 @@ def configure_logging(
     info_h.setLevel(level)
     info_h.setFormatter(log_formatter)
 
-    error_h = TimedRotatingFileHandler(
+    error_h = SafeTimedRotatingFileHandler(
         str(err_path),
         when="D",
         interval=1,

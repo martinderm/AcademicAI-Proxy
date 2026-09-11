@@ -10,6 +10,7 @@ Start:
 Endpoints:
     GET  /v1/models                 → Modell-Liste
     POST /v1/chat/completions       → Chat Completion (inkl. Streaming-Emulation)
+    POST /v1/responses              → OpenAI Responses API (Codex CLI / Desktop)
     GET  /health                    → Health Check
     GET  /internal/cost-status      → Interner Kosten-Status
 """
@@ -49,6 +50,8 @@ from academicai.request_guards import (
     _validate_request_json_size,
     validate_chat_request_body,
     _validate_chat_request_body,
+    validate_responses_request_body,
+    _validate_responses_request_body,
     rate_limit_bucket,
     _rate_limit_bucket,
     prune_rate_limit_buckets,
@@ -57,6 +60,12 @@ from academicai.request_guards import (
     _enforce_chat_rate_limit,
     _rate_limit_buckets,
     _rate_limit_lock,
+)
+
+from academicai.responses import (
+    normalize_responses_request,
+    build_responses_output,
+    build_responses_sse_events,
 )
 
 from academicai.humanization import (
@@ -174,6 +183,7 @@ from academicai.app import (
     cost_status,
     list_models,
     chat_completions,
+    responses,
 )
 
 

@@ -169,6 +169,105 @@ def validate_chat_request_body(
 _validate_chat_request_body = validate_chat_request_body
 
 
+def validate_responses_request_body(
+    body: dict,
+    max_messages: Optional[int] = None,
+    max_message_text_chars: Optional[int] = None,
+    max_tools: Optional[int] = None,
+    max_tool_schema_chars: Optional[int] = None,
+) -> None:
+    """
+    Validiert den Inbound-Responses-API-Request-Body gegen OpenAI Responses-Schemas und Schutzgrenzen.
+
+    Raises:
+        HTTPException(422): Bei ungültigen Schema-Strukturen, ungültigen Typen oder fehlenden Pflichtfeldern.
+        HTTPException(413): Wenn Nachrichtenanzahl, Textlänge, Tool-Anzahl oder Schemagröße Schutzgrenzen übersteigen.
+    """
+    if not isinstance(body, dict):
+        log.warning("Validation rejected (422): request body must be a JSON object")
+        raise HTTPException(status_code=422, detail="request body must be a JSON object")
+
+    model = body.get("model")
+    if not isinstance(model, str) or not model.strip():
+        log.warning("Validation rejected (422): model must be a non-empty string")
+        raise HTTPException(status_code=422, detail="model must be a non-empty string")
+
+    if len(model.strip()) > 200:
+        log.warning(f"Validation rejected (422): model name too long ({len(model.strip())} chars > 200)")
+        raise HTTPException(status_code=422, detail="model is too long")
+
+    instructions = body.get("instructions")
+    raw_input = body.get("input")
+
+    if instructions is None and raw_input is None:
+        log.warning("Validation rejected (422): either 'input' or 'instructions' must be provided")
+        raise HTTPException(status_code=422, detail="either 'input' or 'instructions' must be provided")
+
+    limit_msg_text = int(_get_limit("MAX_MESSAGE_TEXT_CHARS", max_message_text_chars))
+
+    if instructions is not None:
+        if not isinstance(instructions, str):
+            log.warning("Validation rejected (422): instructions must be a string")
+            raise HTTPException(status_code=422, detail="instructions must be a string")
+        if len(instructions) > limit_msg_text:
+            log.warning(f"Validation rejected (413): instructions length {len(instructions)} exceeds limit ({limit_msg_text})")
+            raise HTTPException(status_code=413, detail=f"instructions exceed limit ({limit_msg_text} chars)")
+
+    if raw_input is not None:
+        if isinstance(raw_input, str):
+            if len(raw_input) > limit_msg_text:
+                log.warning(f"Validation rejected (413): input length {len(raw_input)} exceeds limit ({limit_msg_text})")
+                raise HTTPException(status_code=413, detail=f"input exceeds limit ({limit_msg_text} chars)")
+        elif isinstance(raw_input, list):
+            limit_messages = int(_get_limit("MAX_MESSAGES", max_messages))
+            if len(raw_input) > limit_messages:
+                log.warning(f"Validation rejected (413): input items count {len(raw_input)} exceeds limit ({limit_messages})")
+                raise HTTPException(status_code=413, detail=f"input items exceed limit ({limit_messages})")
+            for idx, item in enumerate(raw_input):
+                if not isinstance(item, dict):
+                    log.warning(f"Validation rejected (422): input[{idx}] must be an object")
+                    raise HTTPException(status_code=422, detail=f"input[{idx}] must be an object")
+                content_text = ""
+                if item.get("type") == "message" or "role" in item:
+                    content_text = extract_text_content(item.get("content"))
+                elif item.get("type") == "function_call_output":
+                    content_text = str(item.get("output") or "")
+                elif item.get("type") == "function_call":
+                    content_text = str(item.get("arguments") or "")
+                if len(content_text) > limit_msg_text:
+                    log.warning(f"Validation rejected (413): input[{idx}] content length exceeds limit ({limit_msg_text})")
+                    raise HTTPException(status_code=413, detail=f"input[{idx}] exceeds limit ({limit_msg_text} chars)")
+        else:
+            log.warning("Validation rejected (422): input must be a string or a list of items")
+            raise HTTPException(status_code=422, detail="input must be a string or a list of items")
+
+    tools = body.get("tools")
+    if tools is not None:
+        if not isinstance(tools, list):
+            log.warning("Validation rejected (422): tools must be a list")
+            raise HTTPException(status_code=422, detail="tools must be a list")
+        limit_tools = int(_get_limit("MAX_TOOLS", max_tools))
+        if len(tools) > limit_tools:
+            log.warning(f"Validation rejected (413): tools count {len(tools)} exceeds limit ({limit_tools})")
+            raise HTTPException(status_code=413, detail=f"tools exceed limit ({limit_tools})")
+        limit_tool_schema = int(_get_limit("MAX_TOOL_SCHEMA_CHARS", max_tool_schema_chars))
+        for idx, tool in enumerate(tools):
+            if not isinstance(tool, dict):
+                log.warning(f"Validation rejected (422): tools[{idx}] must be an object")
+                raise HTTPException(status_code=422, detail=f"tools[{idx}] must be an object")
+            try:
+                schema_size = len(json.dumps(tool, ensure_ascii=False))
+            except Exception:
+                log.warning(f"Validation rejected (422): tools[{idx}] is not JSON-serializable")
+                raise HTTPException(status_code=422, detail=f"tools[{idx}] is not JSON-serializable")
+            if schema_size > limit_tool_schema:
+                log.warning(f"Validation rejected (413): tools[{idx}] schema exceeds limit ({limit_tool_schema})")
+                raise HTTPException(status_code=413, detail=f"tools[{idx}] exceeds limit ({limit_tool_schema} chars)")
+
+
+_validate_responses_request_body = validate_responses_request_body
+
+
 def _rate_limit_bucket(request: Request, key: str) -> str:
     """Ermittelt den Rate-Limit-Bucket-Bezeichner aus Client-Host und Token-Präfix."""
     client_host = request.client.host if (request and hasattr(request, "client") and request.client) else "unknown"
@@ -276,6 +375,8 @@ __all__ = [
     "_validate_request_json_size",
     "validate_chat_request_body",
     "_validate_chat_request_body",
+    "validate_responses_request_body",
+    "_validate_responses_request_body",
     "rate_limit_bucket",
     "_rate_limit_bucket",
     "prune_rate_limit_buckets",

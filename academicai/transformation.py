@@ -20,11 +20,12 @@ def extract_text_content(content: Any) -> str:
                 parts.append(part)
             elif isinstance(part, dict):
                 # {"type": "text", "text": "..."} oder {"type": "tool_result", "content": "..."}
-                if part.get("type") == "text":
+                ptype = part.get("type")
+                if ptype in ("text", "input_text", "output_text"):
                     val = part.get("text", "")
                     if val:
                         parts.append(val)
-                elif part.get("type") == "tool_result":
+                elif ptype == "tool_result":
                     inner = part.get("content", "")
                     res = extract_text_content(inner)
                     if res:
@@ -43,15 +44,19 @@ _extract_text_content = extract_text_content
 def _normalize_messages(messages: list) -> list:
     """
     Normalisiert Messages für das AcademicAI-Backend:
-    - role=system  → in erste user-Message einbauen
+    - role=system / developer → in erste user-Message einbauen
     - role=tool    → role=user mit "<tool_result>"-Tag
     - assistant mit tool_calls → nur Text-Content behalten
     AcademicAI unterstützt nur: user / assistant
     """
-    # 1. System-Messages extrahieren
-    system_parts = [extract_text_content(m.get("content")) for m in messages if m.get("role") == "system"]
+    # 1. System- und Developer-Messages extrahieren
+    system_parts = [
+        extract_text_content(m.get("content"))
+        for m in messages
+        if m.get("role") in ("system", "developer")
+    ]
     system_parts = [p for p in system_parts if p]
-    non_system = [m for m in messages if m.get("role") != "system"]
+    non_system = [m for m in messages if m.get("role") not in ("system", "developer")]
 
     # 2. tool / tool_calls normalisieren
     normalized = []

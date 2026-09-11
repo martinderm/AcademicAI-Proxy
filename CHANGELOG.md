@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.7 - 2026-09-11
+
+### 🤖 OpenAI Codex & Responses API
+- **`POST /v1/responses`**: Added fully compliant OpenAI Responses API endpoint for OpenAI Codex CLI and Codex Desktop App (`wire_api = "responses"`).
+- **Shared Canonical Engine**: Zero code duplication — both `/v1/chat/completions` and `/v1/responses` invoke `_execute_completion_pipeline`.
+- **Codex Wire Protocol Support**: Normalizes top-level `instructions`, structured `input` arrays (`message`, `function_call`, `function_call_output`), and flat tool parameter schemas.
+- **SSE Streaming Events**: Implements OpenAI Responses streaming events (`response.created`, `response.in_progress`, delta text/function_call chunks, `response.output_item.done`, `response.completed`).
+- **Token Accounting**: Emits `input_tokens` and `output_tokens` (strictly required by Codex CLI's Rust deserializer) alongside standard `prompt_tokens` and `completion_tokens`.
+- **Multi-Turn Tool Roundtrips**: Emits tool calls to Codex for client-side local sandbox execution, receiving `function_call_output` in follow-up turns.
+- **Codex Documentation**: Added [`docs/codex.md`](docs/codex.md) with comprehensive configuration guide (`config.toml`) and usage instructions.
+
+### 🏗️ Domain Modularization & Modernization
+- **Modular Domain Architecture**: Decomposed monolithic `server.py` into cohesive domain modules:
+  - `academicai/config.py`: Typed configuration and safe import-time validation.
+  - `academicai/request_guards.py`: Request body validation, schema enforcement, and rate limiting with TTL bucket sweep.
+  - `academicai/cost_monitoring.py`: Cost API cache, atomic file operations, and status computation.
+  - `academicai/runtime.py`: PID file lifecycle and backend health checks.
+  - `academicai/logging_config.py`: Windows-safe rotating log handlers and Uvicorn logger wiring.
+  - `academicai/humanization.py`: Target channel detection and 2nd-pass humanization.
+  - `academicai/app.py`: FastAPI app factory and modern ASGI `lifespan` context manager (deprecating legacy `@app.on_event`).
+  - `academicai/responses.py`: Responses API request normalization and SSE event builder.
+  - `server.py`: Slim compatibility entrypoint and CLI runner (< 200 lines).
+- **Tool Emulation Upgrades**:
+  - High-density TypeScript tool signatures (`_compact_tool_def`) with concise enum unions, typed arrays, defaults, and shallow objects.
+  - Hard `tool_choice` enforcement (`required`, specific target, or `none`).
+  - JSON-repair sanitization (trailing comma removal, lenient control chars, Windows path escape handling).
+  - Standardized XML observation tags (`<tool_result id="..." name="...">`).
+- **Windows Reliability**: Implemented `SafeTimedRotatingFileHandler` preventing `WinError 32` file-lock conflicts during log rotation.
+
+### 🧪 Test Suite & Safety Baselines
+- Expanded test coverage from 19 to 186 passing offline tests.
+- Added comprehensive unit and integration suites: `test_responses_api.py`, `test_app_unit.py`, `test_logging_config_unit.py`, `test_runtime_unit.py`, `test_cost_monitoring_unit.py`, `test_request_guards.py`, `test_config.py`, `test_tool_emulation_unit.py`, `test_characterization_endpoints.py`.
+- Test discovery safety baseline (`pytest.ini` scoped to `tests/`) and isolated test port fallback (`11436`).
+
 ## 0.6 - 2026-07-17
 
 ### 🔒 Security & Hardening

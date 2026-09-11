@@ -178,7 +178,10 @@ def _compact_tool_def(tool: dict) -> str:
         return ""
     fn = tool.get("function")
     if not isinstance(fn, dict):
-        return ""
+        if "name" in tool:
+            fn = tool
+        else:
+            return ""
     name = fn.get("name", "?")
     desc = (fn.get("description") or "").split("\n")[0][:120].strip()
 

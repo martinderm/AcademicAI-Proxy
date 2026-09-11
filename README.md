@@ -6,6 +6,7 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 ## Status
 
 - Chat completions: ✅
+- OpenAI Responses API (`POST /v1/responses` for Codex CLI & Desktop): ✅
 - Model list endpoint: ✅
 - Health endpoint: ✅
 - Cost status endpoint: ✅
@@ -65,10 +66,24 @@ While reliable for everyday agent tasks, emulating function calling over a text-
 
 ## Endpoints
 
-- `GET /health`
-- `GET /internal/cost-status` (cost snapshot)
-- `GET /v1/models`
-- `POST /v1/chat/completions`
+- `GET /health` — Service & backend health check
+- `GET /internal/cost-status` — Cached cost snapshot
+- `GET /v1/models` — Dynamic model discovery
+- `POST /v1/chat/completions` — Standard OpenAI Chat Completions API
+- `POST /v1/responses` — OpenAI Responses API for OpenAI Codex CLI & Desktop
+
+## Available Models
+
+The proxy dynamically discovers and validates available models from the AcademicAI backend via `GET /v1/models`. Typical models supported include:
+
+| Family | Model IDs | Key Features |
+| :--- | :--- | :--- |
+| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `gpt-5.2`, `gpt-5.5`, `o3` | Emulated tool-calling, Azure KV prefix caching, reasoning parameters |
+| **Anthropic** | `claude-opus-4-6`, `claude-opus-4-8` | 1M token context window, deep reasoning |
+| **Google** | `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` | 1M token context window, multimodal capabilities |
+| **Perplexity** | `sonar-pro`, `sonar-reasoning-pro` | Built-in search and citations |
+| **Mistral** | `Mistral-Large-3` | 256k context window |
+
 
 ## Authentication
 
@@ -109,6 +124,27 @@ py server.py
 # optional controlled stop
 .\stop_server.ps1
 ```
+
+## OpenAI Codex Integration
+
+Der Proxy unterstützt [OpenAI Codex](https://github.com/openai/codex) (CLI und Desktop) über den standardkonformen Endpunkt `POST /v1/responses` (`wire_api = "responses"`).
+
+Konfiguration in `~/.codex/config.toml` bzw. `%USERPROFILE%\.codex\config.toml`:
+
+```toml
+model = "gpt-4o"
+model_provider = "academicai"
+
+[model_providers.academicai]
+name = "AcademicAI"
+base_url = "http://127.0.0.1:11435/v1"
+wire_api = "responses"
+env_key = "ACADEMICAI_PROXY_API_KEY"
+supports_websockets = false
+```
+
+Ausführliche Details zu Tools, Multi-Turn-Roundtrips und Modellwahl findest du in [`docs/codex.md`](docs/codex.md).
+
 
 ## Local test environment
 
@@ -204,6 +240,34 @@ Validation and protection behavior:
 - Oversized payload/tool schema/message content: `413`
 - Rate limit exceeded: `429`
 
+## Supported request parameters (`POST /v1/responses`)
+
+OpenAI Responses API endpoint designed for OpenAI Codex CLI and Desktop (`wire_api = "responses"`):
+
+Required:
+
+- `model` (e.g. `gpt-4o`, `gpt-4o-mini`, etc.)
+- `input` (list of structured input items or plain text string)
+
+Supported input item types:
+
+- `type: "message"`: Standard conversational turn. Roles supported: `user`, `assistant`, `system`, `developer`. Text content can be a plain string or array of parts (`type: "input_text"` or `type: "output_text"`).
+- `type: "function_call"`: Tool calls emitted in prior turns (`call_id`, `name`, `arguments`).
+- `type: "function_call_output"`: Output returned from client-side execution in Codex's local sandbox (`call_id`, `output`).
+
+Optional:
+
+- `instructions`: Top-level system prompt instructions.
+- `tools`: List of tool definitions. Supports both flat schema (`{"type": "function", "name": "...", "parameters": {...}}`) and nested OpenAI schema (`{"type": "function", "function": {...}}`).
+- `stream`: Boolean (`true` for SSE streaming wire events, `false` for non-streaming JSON).
+- `temperature`: Temperature override.
+- `max_output_tokens`: Maximum completion tokens to generate.
+
+Token Accounting & Metadata:
+
+- Emits `input_tokens` and `output_tokens` (strictly required by OpenAI Codex CLI's Rust parser) as well as `prompt_tokens`, `completion_tokens`, and `total_tokens` in `usage`.
+
+
 ## Default behavior tuning (env)
 
 These defaults apply only when the client did not set the field explicitly.
@@ -287,22 +351,67 @@ answer and discourages unnecessary additional tool calls.
 This reduces accidental re-tooling loops while still allowing another tool call
 if the latest tool result is clearly incomplete.
 
+## API Quick Reference (cURL)
+
+### 1. Health Check
+```bash
+curl -s http://127.0.0.1:11435/health
+```
+
+### 2. List Available Models
+```bash
+curl -s -H "Authorization: Bearer <ACADEMICAI_PROXY_API_KEY>" \
+  http://127.0.0.1:11435/v1/models
+```
+
+### 3. Chat Completions (`POST /v1/chat/completions`)
+```bash
+curl -s -H "Authorization: Bearer <ACADEMICAI_PROXY_API_KEY>" \
+  -H "Content-Type: application/json" \
+  http://127.0.0.1:11435/v1/chat/completions \
+  -d '{
+    "model": "gpt-4o",
+    "messages": [
+      {"role": "system", "content": "You are a concise assistant."},
+      {"role": "user", "content": "Hello!"}
+    ]
+  }'
+```
+
+### 4. OpenAI Responses API (`POST /v1/responses`)
+```bash
+curl -s -H "Authorization: Bearer <ACADEMICAI_PROXY_API_KEY>" \
+  -H "Content-Type: application/json" \
+  http://127.0.0.1:11435/v1/responses \
+  -d '{
+    "model": "gpt-4o",
+    "instructions": "You are a concise assistant.",
+    "input": [
+      {"type": "message", "role": "user", "content": "Say OK"}
+    ]
+  }'
+```
+
 ## Tests
 
-Run smoke + functional tests:
+Run the complete offline regression test suite (186 unit and integration tests):
 
 ```powershell
-py -m pytest -q
-py tests/test_tool_emulation.py
-py -m pytest -q tests/test_post_tool_guard.py
-py -m pytest -q tests/test_hardening_security_runtime.py
+.\run_local_tests.ps1 -Mode offline
 ```
 
-Optional:
+Or via pytest directly:
 
 ```powershell
-py tests/test_openclaw_style.py
+pytest -q
 ```
+
+To run end-to-end tests against the live AcademicAI backend (requires credentials configured in `.env.localtest`):
+
+```powershell
+.\run_local_tests.ps1 -Mode e2e
+```
+
 
 ## Project layout
 
@@ -319,19 +428,21 @@ academicai-proxy/
     logging_config.py    # Rotating file handlers & uvicorn wiring
     provider.py          # HTTP transport to AcademicAI backend
     request_guards.py    # Inbound payload validation & rate limiting
+    responses.py         # OpenAI Responses API normalization & SSE serialization
     runtime.py           # Process lifecycle & backend health checks
     tool_emulation.py    # TypeScript signatures, repair & post-guard
     transformation.py    # Message role normalization & text extraction SSOT
   docs/
     architecture/        # Concept & modularization architecture docs
     archive/             # Legacy archive artifacts
+    codex.md             # OpenAI Codex CLI & Desktop setup guide
     system-map/          # ICM-aligned agent architecture map
     tenant-template/     # Environment templates
   server.py              # Slim CLI runner & compatibility layer
   start_server.ps1       # Controlled service startup
   stop_server.ps1        # Controlled service shutdown
   run_local_tests.ps1    # Offline and E2E test runner
-  tests/                 # Comprehensive test suite (175+ tests)
+  tests/                 # Comprehensive test suite (185+ tests)
   requirements.txt
   README.md
 ```

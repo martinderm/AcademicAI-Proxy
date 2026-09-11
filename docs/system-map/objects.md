@@ -21,6 +21,18 @@ Standard-OpenAI-Payload:
 - **`stream`** `(bool, default: False)`: SSE-Streaming aktivieren (`text/event-stream`).
 - **`temperature`**, **`max_tokens`**, **`top_p`** `(optional)`: Generierungsparameter.
 
+### `POST /v1/responses` (OpenAI Responses API für Codex CLI & Desktop)
+Responses-API-Payload von OpenAI Codex:
+- **`model`** `(str, required)`: Zielmodell (z. B. `gpt-4o`, `gpt-4o-mini`).
+- **`instructions`** `(str, optional)`: System-Prompt auf oberster Ebene (wird zu `role: system` normalisiert).
+- **`input`** `(list[dict] | str, required)`: Liste strukturierter Eingabeelemente oder Freitext:
+  - `type: "message"`: Rolle (`developer`, `system`, `user`, `assistant`), `content` (`str` oder Array von Text-Parts wie `input_text`).
+  - `type: "function_call"`: Tool-Aufruf von Codex (`call_id`, `name`, `arguments`).
+  - `type: "function_call_output"`: Tool-Ergebnis nach lokaler Ausführung in Codex (`call_id`, `output`).
+- **`tools`** `(list[dict], optional)`: Tool-Definitionen (unterstützt sowohl flaches Format mit `name` auf Root-Ebene als auch verschachteltes `function`-Format).
+- **`stream`** `(bool, default: False)`: SSE-Streaming aktivieren (`text/event-stream`).
+- **`temperature`**, **`max_output_tokens`** `(optional)`: Generierungsparameter.
+
 ### `GET /v1/models`
 Liefert verfügbare Modelle als OpenAI ModelList:
 ```json
@@ -368,3 +380,49 @@ Das Root-Skript [`server.py`](../../server.py) wurde im Zuge des Refactorings zu
   - Stellt sicher, dass bestehende Test-Fixtures (`server.app`), Test-Monkeypatches (`server.MAX_MESSAGES`, `server.academicai.completion`, `server._check_backend_health` etc.) und externe Aufrufer ohne Codeänderung fehlerfrei funktionieren.
 - **Azyklische Modulstruktur:**
   - `server.py` enthält keinerlei eigene Domänenlogik mehr; alle Abhängigkeiten fließen unidirektional von `server.py` in die `academicai`-Module.
+
+---
+
+## 12. OpenAI Responses API & Codex Wire Protocol ([`academicai/responses.py`](../../academicai/responses.py))
+
+Das Modul [`academicai/responses.py`](../../academicai/responses.py) kapselt die Request-Normalisierung, SSE-Wire-Event-Generierung und Token-Usage-Berechnung für die OpenAI Responses API (insbesondere für OpenAI Codex CLI und Desktop):
+
+### Inbound-Normalisierung (`normalize_responses_request`)
+- **`instructions` $\to$ System-Prompt:**
+  - Wandelt den Top-Level-String `instructions` in eine `{"role": "system", "content": instructions}` Nachricht am Kopf der Nachrichtenliste um.
+- **`input`-Normalisierung:**
+  - Unterstützt String-Eingaben (`input: "..."` $\to$ User-Message).
+  - Array von Objekten:
+    - `type: "message"`: Behält Rolle bei (`developer` wird in `transformation.py` wie `system` behandelt). Extrahiert Text aus `input_text` oder `output_text` Content-Parts.
+    - `type: "function_call"`: Konvertiert vorherige Codex-Toolaufrufe in Assistant-Nachrichten mit `tool_calls` (`call_id`, `name`, `arguments`).
+    - `type: "function_call_output"`: Konvertiert Werkzeugergebnisse aus der lokalen Codex-Sandbox in `role: "tool"` Nachrichten (`tool_call_id=call_id`, `content=output`).
+- **Tool-Definitionen:**
+  - Unterstützt sowohl flache Tool-Definitionen (wie von Codex gesendet: `{"type": "function", "name": "...", "description": "...", "parameters": {...}}`) als auch verschachtelte OpenAI-Tools (`{"type": "function", "function": {...}}`).
+
+### Outbound-Serialisierung (`build_responses_output`)
+- Erzeugt ein nicht-streamendes Responses-API-JSON-Objekt:
+  - `id`: Eindeutige ID mit Präfix `resp_...`.
+  - `object`: `"response"`.
+  - `status`: `"completed"`.
+  - `output`: Liste von Output-Items:
+    - Textantwort: `[{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "..."}]}]`
+    - Tool-Calls: `[{"type": "function_call", "call_id": "...", "name": "...", "arguments": "..."}]`
+  - `usage`: Vollständiges Token-Accounting.
+
+### SSE-Streaming-Events (`build_responses_sse_events`)
+- Generiert standardkonforme OpenAI Responses Server-Sent Events für Codex:
+  1. `response.created` (initialer Response-Envelope)
+  2. `response.in_progress` (Bearbeitungsstatus)
+  3. Pro Output-Item:
+     - Text: `response.output_item.added` (`type: "message"`), `response.content_part.added`, gefolgt von `response.text.delta`-Events pro Token-Chunk, und `response.output_item.done`.
+     - Tool-Call: `response.output_item.added` (`type: "function_call"`), `response.function_call_arguments.delta`-Events mit JSON-Argumenten, und `response.output_item.done`.
+  4. `response.completed` (finaler Response-Envelope mit `usage` und `status: "completed"`).
+
+### Token-Usage & Rust-Deserializer-Kompatibilität (`_normalize_responses_usage`)
+- Die OpenAI Codex CLI (Rust-basiert) verlangt im `usage`-Objekt von `response.completed` strikt die Schlüssel `input_tokens` und `output_tokens`.
+- `_normalize_responses_usage` mappt die Token-Zahlen konsistent:
+  - `input_tokens` $\leftrightarrow$ `prompt_tokens`
+  - `output_tokens` $\leftrightarrow$ `completion_tokens`
+  - `total_tokens`
+- Liefert alle 5 Schlüssel aus, wodurch sowohl die Codex CLI als auch Standard-OpenAI-Clients fehlerfrei deserialisieren können.
+

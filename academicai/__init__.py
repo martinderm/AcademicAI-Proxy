@@ -51,6 +51,8 @@ from .config import Settings, get_settings, validate_config  # noqa: F401
 from .request_guards import (  # noqa: F401
     validate_chat_request_body,
     _validate_chat_request_body,
+    validate_responses_request_body,
+    _validate_responses_request_body,
     validate_request_json_size,
     _validate_request_json_size,
     rate_limit_bucket,
@@ -59,6 +61,11 @@ from .request_guards import (  # noqa: F401
     _prune_rate_limit_buckets,
     enforce_chat_rate_limit,
     _enforce_chat_rate_limit,
+)
+from .responses import (  # noqa: F401
+    normalize_responses_request,
+    build_responses_output,
+    build_responses_sse_events,
 )
 from .tool_emulation import (  # noqa: F401
     inject_tools_into_messages,
@@ -127,6 +134,8 @@ __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
     "Settings", "get_settings", "validate_config",
     "validate_chat_request_body", "_validate_chat_request_body",
+    "validate_responses_request_body", "_validate_responses_request_body",
+    "normalize_responses_request", "build_responses_output", "build_responses_sse_events",
     "validate_request_json_size", "_validate_request_json_size",
     "rate_limit_bucket", "_rate_limit_bucket",
     "prune_rate_limit_buckets", "_prune_rate_limit_buckets",

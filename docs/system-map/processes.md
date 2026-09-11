@@ -19,16 +19,25 @@ Der Server-Lifecycle wird modern über FastAPI Lifespan Events gesteuert:
     └─ write_pid_file() (Registrierung der aktuellen PID in server.pid)
        │
        ▼
- 2. Request Handling Phase (Active HTTP Server):
-    ├─ GET /health (Backend Health Check & Latenzmessung)
-    ├─ GET /internal/cost-status (Cost Status Snapshot aus Cache)
-    ├─ GET /v1/models (Modell-Discovery)
-    └─ POST /v1/chat/completions (8-Stufen Completion Pipeline)
-       │
-       ▼
- 3. Lifespan Shutdown (academicai/app.py: lifespan finally):
-    └─ cleanup_pid_file() (Sicheres Entfernen der PID-Datei bei passendem PID-Match)
+  2. Request Handling Phase (Active HTTP Server):
+     ├─ GET /health (Backend Health Check & Latenzmessung)
+     ├─ GET /internal/cost-status (Cost Status Snapshot aus Cache)
+     ├─ GET /v1/models (Modell-Discovery)
+     ├─ POST /v1/chat/completions (OpenAI Chat Completions via _execute_completion_pipeline)
+     └─ POST /v1/responses (OpenAI Responses API für Codex CLI & Desktop via _execute_completion_pipeline)
+        │
+        ▼
+  3. Lifespan Shutdown (academicai/app.py: lifespan finally):
+     └─ cleanup_pid_file() (Sicheres Entfernen der PID-Datei bei passendem PID-Match)
 ```
+
+### Shared Execution Engine: `_execute_completion_pipeline`
+Sowohl `POST /v1/chat/completions` als auch `POST /v1/responses` nutzen intern dieselbe zentrale Ausführungspipeline in [`academicai/app.py`](../../academicai/app.py):
+1. **Normalisierung:** `/v1/responses` normalisiert `instructions`, `input` und Tools via `academicai.responses.normalize_responses_request` in das kanonische Format (`messages`, `tools`).
+2. **Ausführung:** `_execute_completion_pipeline` führt Message-Normalisierung, Sticky-System-Prepending, Tool-Injektion, LLM-Backend-Call, Tool-Call-Parsing und optionale Humanisierung durch und liefert ein typisiertes `CanonicalResult`.
+3. **Formatierung:**
+   - Chat Completions: Formatiert als Standard-OpenAI-Response (`build_tool_calls_response` oder `build_tool_calls_sse_chunks`).
+   - Responses API: Formatiert als OpenAI-Responses-Objekt (`build_responses_output`) oder Responses-SSE-Events (`build_responses_sse_events`).
 
 ### Request Lifecycle: `POST /v1/chat/completions`
 
@@ -215,6 +224,7 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_runtime_unit.py` | Unit-Tests für Laufzeit-Lifecycle: PID-File-Erstellung und -Bereinigung mit PID-Matching, Backend-Health-Checks (Erfolg, Timeout, Fehler, Deaktivierung), Health-Payload-Generierung (`ok`/`degraded`) und Server-Re-Exports. |
 | `test_logging_config_unit.py` | Unit-Tests für Logging-Konfiguration: Formatter, rotierende File-Handler (Info & Error), Konsolen-Handler, Uvicorn-Logger-Wiring (propagate=False), dynamische Pfadauflösung, Windows-kompatibles Schließen via close_handlers und Server-Re-Exports. |
 | `test_app_unit.py` | Unit-Tests für Application Factory (`create_app`), modernen ASGI-Lifespan (Startup/Shutdown Hooks, Starlette TestClient), Routing-Delegation (`/health`, `/internal/cost-status`, `/v1/models`, `/v1/chat/completions`), Fehlerbehandlung (502) sowie `apply_post_tool_guard` und Server-Re-Exports. |
+| `test_responses_api.py` | Umfassende Suite für OpenAI Responses API (`POST /v1/responses`): Normalisierung (Top-level instructions, strukturierte input-Items, flat/nested tools), Validierung (422/413), Non-Streaming Serialization, vollständige SSE-Event-Sequenz, Rust-kompatibles Token-Accounting (`input_tokens`/`output_tokens`), Authentifizierung und Multi-Turn-Tool-Roundtrip mit sandbox-basiertem `function_call_output`. |
 | `run_local_tests.ps1` | Lokaler Test-Runner: Führt Offline-Tests aus bzw. startet im E2E-Modus den isolierten Test-Server auf **Port 11436**, führt `pytest` aus und stoppt den Server sauber via PID. |
 
 

@@ -72,6 +72,9 @@ def test_create_app_instantiates_fastapi_with_routes():
     assert "/v1/chat/completions" in registered
     assert "POST" in registered["/v1/chat/completions"]
 
+    assert "/v1/responses" in registered
+    assert "POST" in registered["/v1/responses"]
+
 
 def test_module_level_app_instance():
     assert isinstance(app, FastAPI)
@@ -265,6 +268,7 @@ def test_backward_compatibility_server_and_academicai_reexports():
         "cost_status",
         "list_models",
         "chat_completions",
+        "responses",
     ]
 
     for sym in app_module_symbols:
@@ -287,6 +291,7 @@ def test_isolated_module_imports_without_server():
         "academicai.runtime",
         "academicai.logging_config",
         "academicai.humanization",
+        "academicai.responses",
         "academicai.app",
         "academicai",
     ]

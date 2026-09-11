@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 import time
+from collections import namedtuple
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -51,6 +52,12 @@ from academicai.request_guards import (
     enforce_chat_rate_limit,
     validate_chat_request_body,
     validate_request_json_size,
+    validate_responses_request_body,
+)
+from academicai.responses import (
+    build_responses_output,
+    build_responses_sse_events,
+    normalize_responses_request,
 )
 from academicai.runtime import (
     check_backend_health,
@@ -77,6 +84,7 @@ _check_backend_health = check_backend_health
 _get_cost_cache_with_lazy_refresh = get_cost_cache_with_lazy_refresh
 _build_cost_headers = build_cost_headers
 _validate_chat_request_body = validate_chat_request_body
+_validate_responses_request_body = validate_responses_request_body
 _enforce_chat_rate_limit = enforce_chat_rate_limit
 _last_user_text = last_user_text
 _apply_post_tool_guard = apply_post_tool_guard
@@ -100,6 +108,11 @@ _INITIAL_DEFAULTS: dict[str, Any] = {
     "validate_request_json_size": validate_request_json_size,
     "validate_chat_request_body": validate_chat_request_body,
     "_validate_chat_request_body": validate_chat_request_body,
+    "validate_responses_request_body": validate_responses_request_body,
+    "_validate_responses_request_body": validate_responses_request_body,
+    "normalize_responses_request": normalize_responses_request,
+    "build_responses_output": build_responses_output,
+    "build_responses_sse_events": build_responses_sse_events,
     "enforce_chat_rate_limit": enforce_chat_rate_limit,
     "_enforce_chat_rate_limit": enforce_chat_rate_limit,
     "last_user_text": last_user_text,
@@ -268,55 +281,53 @@ async def list_models(key: str = Depends(verify_key)):
         raise HTTPException(status_code=502, detail=str(e))
 
 
-async def chat_completions(request: Request, key: str = Depends(verify_key)):
-    try:
-        body = await request.json()
-    except Exception:
-        log.warning("Chat request rejected (400): invalid JSON body")
-        raise HTTPException(status_code=400, detail="invalid JSON body")
+CanonicalResult = namedtuple(
+    "CanonicalResult",
+    [
+        "completion_id",
+        "created_ts",
+        "model",
+        "content",
+        "finish_reason",
+        "usage",
+        "tool_calls_data",
+    ],
+)
 
-    max_req_chars = _get_setting("MAX_REQUEST_JSON_CHARS", MAX_REQUEST_JSON_CHARS)
-    size_validator = _get_setting("validate_request_json_size", validate_request_json_size)
-    size_validator(body, max_chars=max_req_chars)
 
-    body_validator = _get_setting("_validate_chat_request_body") or _get_setting("validate_chat_request_body", validate_chat_request_body)
-    body_validator(body)
-
-    rate_limiter = _get_setting("_enforce_chat_rate_limit") or _get_setting("enforce_chat_rate_limit", enforce_chat_rate_limit)
-    rate_limiter(request, key)
-
-    # Vollständiges Request-Dump für Debugging (optional via Env)
-    debug_dumps = _get_setting("DEBUG_DUMPS", False)
-    if debug_dumps:
-        import json as _json
-        _dump_path = Path(__file__).resolve().parent.parent / "last_request.json"
-        try:
-            with open(_dump_path, "w", encoding="utf-8") as _f:
-                _json.dump(redact_sensitive(body), _f, ensure_ascii=False, indent=2)
-        except Exception:
-            pass
-
-    model = body.get("model")
-    messages = list(body.get("messages") or [])
-
-    # Top-level "system" Parameter (z.B. von Anthropic-style Clients) → in messages einfügen
-    top_level_system = body.get("system")
-    if top_level_system and not any(m.get("role") == "system" for m in messages):
-        messages.insert(0, {"role": "system", "content": top_level_system})
-
+async def _execute_completion_pipeline(
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_choice: Any = None,
+    optional_params: Optional[dict[str, Any]] = None,
+    stream: bool = False,
+) -> CanonicalResult:
+    """
+    Kanonische Completion-Pipeline für Chat-Completions und Responses API:
+    - User-Query-Erkennung
+    - Post-Tool-Guard (Fokus auf finale Antwort nach Tool-Ergebnissen)
+    - Tool-Emulation (TypeScript-Schema Prompt-Injection & tool_choice)
+    - Fallback-Defaults für Temperature, Verbosity und Reasoning Effort
+    - Backend-Aufruf via _resolve_completion
+    - Tool-Call Parsing, Respond-Content-Extraktion und Fallbacks
+    - Optionaler Humanisierungs-Pass für Human-Targets
+    """
     user_text_fn = _get_setting("_last_user_text") or _get_setting("last_user_text", last_user_text)
     original_user_query = user_text_fn(messages)
 
-    # Tools extrahieren — werden via Prompt-Injection emuliert
-    tools = body.get("tools") or body.get("functions") or []
     has_tools = bool(tools)
-    tool_choice = body.get("tool_choice")
-    if ("tool_choice" in body) and not has_tools:
+    if tool_choice is not None and not has_tools:
         log.warning("tool_choice provided without tools; ignoring tool emulation for this request")
-    log.info(f"incoming: model={model} stream={body.get('stream')} roles={[m.get('role') for m in messages]} tools={len(tools)} has_tools={has_tools}")
+    log.info(
+        f"incoming completion: model={model} stream={stream} "
+        f"roles={[m.get('role') for m in messages]} tools={len(tools)} has_tools={has_tools}"
+    )
 
     # Bei Follow-up nach Tool-Result finale Antwort stärker priorisieren
-    post_tool_guard_fn = _get_setting("_apply_post_tool_guard") or _get_setting("apply_post_tool_guard", apply_post_tool_guard)
+    post_tool_guard_fn = _get_setting("_apply_post_tool_guard") or _get_setting(
+        "apply_post_tool_guard", apply_post_tool_guard
+    )
     messages = post_tool_guard_fn(messages, has_tools=has_tools)
 
     # Tool-Definitionen in System-Prompt injizieren
@@ -324,30 +335,16 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
         inject_fn = _get_setting("inject_tools_into_messages", inject_tools_into_messages)
         messages = inject_fn(messages, tools, tool_choice=tool_choice)
 
-    want_stream = bool(body.get("stream"))
-    human_target_fn = _get_setting("_is_human_readable_target") or _get_setting("is_human_readable_target", is_human_readable_target)
+    human_target_fn = _get_setting("_is_human_readable_target") or _get_setting(
+        "is_human_readable_target", is_human_readable_target
+    )
     human_target_hint = human_target_fn(messages)
 
-    cost_cache_fn = _get_setting("_get_cost_cache_with_lazy_refresh") or _get_setting("get_cost_cache_with_lazy_refresh", get_cost_cache_with_lazy_refresh)
-    cost_cache = cost_cache_fn()
-    cost_headers_fn = _get_setting("_build_cost_headers") or _get_setting("build_cost_headers", build_cost_headers)
-    response_headers = cost_headers_fn(cost_cache)
-
-    # Optionale Parameter weiterreichen — nur bekannte, AcademicAI-sichere Felder
-    # tools / tool_choice / functions werden via Prompt-Injection emuliert (nicht nativ weitergegeben)
-    optional = {}
-    for field in [
-        "temperature", "max_tokens", "max_completion_tokens",
-        "frequency_penalty", "presence_penalty",
-        "reasoning_effort", "verbosity", "seed", "stop",
-    ]:
-        if field in body:
-            optional[field] = body[field]
+    optional = dict(optional_params or {})
 
     # Sinnvolle Proxy-Defaults (nur falls Client nichts gesetzt hat)
     if has_tools:
         optional.setdefault("temperature", _get_setting("DEFAULT_TOOL_TEMPERATURE", DEFAULT_TOOL_TEMPERATURE))
-        # GPT-5-Modelle profitieren bei Emulation von knapper, deterministischerem Stil
         if model and "gpt-5" in model:
             optional.setdefault("verbosity", _get_setting("DEFAULT_TOOL_VERBOSITY", DEFAULT_TOOL_VERBOSITY))
             optional.setdefault("reasoning_effort", _get_setting("DEFAULT_TOOL_REASONING_EFFORT", DEFAULT_TOOL_REASONING_EFFORT))
@@ -356,31 +353,23 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
         if model and "gpt-5" in model:
             optional.setdefault("verbosity", _get_setting("DEFAULT_CHAT_VERBOSITY", DEFAULT_CHAT_VERBOSITY))
 
-    # response_format: bei Tool-Emulation JSON-Mode erzwingen,
-    # sonst Wert aus Request durchreichen (ausser json_schema)
+    # response_format: bei Tool-Emulation JSON-Mode erzwingen
     if tools:
         optional["response_format"] = {"type": "json_object"}
-    elif "response_format" in body:
-        rf = body.get("response_format")
+    elif "response_format" in optional:
+        rf = optional.get("response_format")
         if isinstance(rf, dict):
-            if rf.get("type") != "json_schema":
-                optional["response_format"] = rf
+            if rf.get("type") == "json_schema":
+                optional.pop("response_format", None)
         else:
             log.warning("ignoring non-dict response_format from client")
+            optional.pop("response_format", None)
 
-    # tailoredAiId via extra_body
-    if "extra_body" in body and "tailoredAiId" in body["extra_body"]:
-        optional["extra_body"] = {"tailoredAiId": body["extra_body"]["tailoredAiId"]}
-
-    try:
-        comp_fn = _resolve_completion()
-        if inspect.iscoroutinefunction(comp_fn):
-            response = await comp_fn(model=model, messages=messages, **optional)
-        else:
-            response = await run_in_threadpool(comp_fn, model=model, messages=messages, **optional)
-    except Exception as e:
-        log.error(f"completion failed: model={model} error={e}")
-        raise HTTPException(status_code=502, detail=str(e))
+    comp_fn = _resolve_completion()
+    if inspect.iscoroutinefunction(comp_fn):
+        response = await comp_fn(model=model, messages=messages, **optional)
+    else:
+        response = await run_in_threadpool(comp_fn, model=model, messages=messages, **optional)
 
     completion_id = response.id
     created_ts = response.created
@@ -403,29 +392,22 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
             names = [c.get("name", "?") for c in tool_calls_data]
             log.info(f"tool_call(s) detected: count={len(tool_calls_data)} names={names}")
         else:
-            # Kein Tool-Call — entweder {"action":"respond",...} oder Fallback
             extracted = extract_respond_content(content)
             if extracted is not None:
                 log.info(f"json_mode respond: content_len={len(extracted)}")
                 content = extracted
-
-                # GPT-5 liefert teils action=respond mit JSON-String in content.
-                # Auf Human-Targets trotzdem in natürlich lesbaren Text umformen.
                 if human_target:
                     humanized_from_content = format_arbitrary_json_for_humans(content)
                     if humanized_from_content is not None:
                         log.warning("json_mode respond: JSON-string content -> human text (human target)")
                         content = humanized_from_content
             else:
-                # Letzter Fallback nur für human-readable Targets.
-                # Für maschinelle Flows (z.B. cron) bleibt raw content erhalten.
                 if human_target:
                     human_text = format_arbitrary_json_for_humans(content)
                     if human_text is not None:
                         log.warning(f"json_mode: arbitrary JSON -> human text (human target): {content[:80]}")
                         content = human_text
                     else:
-                        # Fallback-Fallback: falls Rendern scheitert, wenigstens lesbar
                         codeblock = format_arbitrary_json_as_codeblock(content)
                         if codeblock is not None:
                             log.warning(f"json_mode: arbitrary JSON -> code block fallback (human target): {content[:80]}")
@@ -450,14 +432,100 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
             log.info(f"humanization pass applied: len_before={len(content)} len_after={len(humanized)}")
             content = humanized
 
+    return CanonicalResult(
+        completion_id=completion_id,
+        created_ts=created_ts,
+        model=resp_model,
+        content=content,
+        finish_reason=finish_reason,
+        usage=usage,
+        tool_calls_data=tool_calls_data,
+    )
+
+
+async def chat_completions(request: Request, key: str = Depends(verify_key)):
+    try:
+        body = await request.json()
+    except Exception:
+        log.warning("Chat request rejected (400): invalid JSON body")
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    max_req_chars = _get_setting("MAX_REQUEST_JSON_CHARS", MAX_REQUEST_JSON_CHARS)
+    size_validator = _get_setting("validate_request_json_size", validate_request_json_size)
+    size_validator(body, max_chars=max_req_chars)
+
+    body_validator = _get_setting("_validate_chat_request_body") or _get_setting("validate_chat_request_body", validate_chat_request_body)
+    body_validator(body)
+
+    rate_limiter = _get_setting("_enforce_chat_rate_limit") or _get_setting("enforce_chat_rate_limit", enforce_chat_rate_limit)
+    rate_limiter(request, key)
+
+    # Vollständiges Request-Dump für Debugging (optional via Env)
+    debug_dumps = _get_setting("DEBUG_DUMPS", False)
+    if debug_dumps:
+        _dump_path = Path(__file__).resolve().parent.parent / "last_request.json"
+        try:
+            with open(_dump_path, "w", encoding="utf-8") as _f:
+                json.dump(redact_sensitive(body), _f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    model = body.get("model")
+    messages = list(body.get("messages") or [])
+
+    # Top-level "system" Parameter (z.B. von Anthropic-style Clients) → in messages einfügen
+    top_level_system = body.get("system")
+    if top_level_system and not any(m.get("role") == "system" for m in messages):
+        messages.insert(0, {"role": "system", "content": top_level_system})
+
+    tools = body.get("tools") or body.get("functions") or []
+    tool_choice = body.get("tool_choice")
+    want_stream = bool(body.get("stream"))
+
+    cost_cache_fn = _get_setting("_get_cost_cache_with_lazy_refresh") or _get_setting("get_cost_cache_with_lazy_refresh", get_cost_cache_with_lazy_refresh)
+    cost_cache = cost_cache_fn()
+    cost_headers_fn = _get_setting("_build_cost_headers") or _get_setting("build_cost_headers", build_cost_headers)
+    response_headers = cost_headers_fn(cost_cache)
+
+    # Optionale Parameter weiterreichen — nur bekannte, AcademicAI-sichere Felder
+    optional = {}
+    for field in [
+        "temperature", "max_tokens", "max_completion_tokens",
+        "frequency_penalty", "presence_penalty",
+        "reasoning_effort", "verbosity", "seed", "stop",
+    ]:
+        if field in body:
+            optional[field] = body[field]
+
+    if "response_format" in body:
+        optional["response_format"] = body["response_format"]
+
+    if "extra_body" in body and "tailoredAiId" in body["extra_body"]:
+        optional["extra_body"] = {"tailoredAiId": body["extra_body"]["tailoredAiId"]}
+
+    try:
+        result = await _execute_completion_pipeline(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            optional_params=optional,
+            stream=want_stream,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"completion failed: model={model} error={e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
     # Wenn Streaming gewünscht: Antwort als SSE emulieren
     if want_stream:
         stream_delay_ms = _get_setting("STREAM_CHUNK_DELAY_MS", STREAM_CHUNK_DELAY_MS)
 
         def sse_generator():
-            if tool_calls_data:
+            if result.tool_calls_data:
                 # Tool-Call-Chunks im OpenAI-Streaming-Format
-                for chunk in build_tool_calls_sse_chunks(completion_id, created_ts, resp_model, tool_calls_data):
+                for chunk in build_tool_calls_sse_chunks(result.completion_id, result.created_ts, result.model, result.tool_calls_data):
                     if stream_delay_ms > 0:
                         time.sleep(stream_delay_ms / 1000.0)
                     yield f"data: {json.dumps(chunk)}\n\n"
@@ -466,41 +534,135 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
                 # Chunk 1: role delta
                 if stream_delay_ms > 0:
                     time.sleep(stream_delay_ms / 1000.0)
-                yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': ''}, 'finish_reason': None}]})}\n\n"
+                yield f"data: {json.dumps({'id': result.completion_id, 'object': 'chat.completion.chunk', 'created': result.created_ts, 'model': result.model, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': ''}, 'finish_reason': None}]})}\n\n"
                 # Chunk 2: Content
                 if stream_delay_ms > 0:
                     time.sleep(stream_delay_ms / 1000.0)
-                yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {'content': content}, 'finish_reason': None}]})}\n\n"
+                yield f"data: {json.dumps({'id': result.completion_id, 'object': 'chat.completion.chunk', 'created': result.created_ts, 'model': result.model, 'choices': [{'index': 0, 'delta': {'content': result.content}, 'finish_reason': None}]})}\n\n"
                 # Chunk 3: finish
                 if stream_delay_ms > 0:
                     time.sleep(stream_delay_ms / 1000.0)
-                yield f"data: {json.dumps({'id': completion_id, 'object': 'chat.completion.chunk', 'created': created_ts, 'model': resp_model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': finish_reason}], 'usage': usage})}\n\n"
+                yield f"data: {json.dumps({'id': result.completion_id, 'object': 'chat.completion.chunk', 'created': result.created_ts, 'model': result.model, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': result.finish_reason}], 'usage': result.usage})}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(sse_generator(), media_type="text/event-stream", headers=response_headers)
 
     # Kein Streaming: normaler JSON-Response
-    if tool_calls_data:
+    if result.tool_calls_data:
         return JSONResponse(
-            content=build_tool_calls_response(completion_id, created_ts, resp_model, tool_calls_data, usage),
+            content=build_tool_calls_response(result.completion_id, result.created_ts, result.model, result.tool_calls_data, result.usage),
             headers=response_headers,
         )
 
     return JSONResponse(
         content={
-            "id": completion_id,
+            "id": result.completion_id,
             "object": "chat.completion",
-            "created": created_ts,
-            "model": resp_model,
+            "created": result.created_ts,
+            "model": result.model,
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": content},
-                    "finish_reason": finish_reason,
+                    "message": {"role": "assistant", "content": result.content},
+                    "finish_reason": result.finish_reason,
                 }
             ],
-            "usage": usage,
+            "usage": result.usage,
         },
+        headers=response_headers,
+    )
+
+
+async def responses(request: Request, key: str = Depends(verify_key)):
+    """
+    OpenAI Responses API Endpunkt (POST /v1/responses) für OpenAI Codex CLI,
+    Codex Desktop App und moderne Agent-Harnesses.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        log.warning("Responses request rejected (400): invalid JSON body")
+        raise HTTPException(status_code=400, detail="invalid JSON body")
+
+    max_req_chars = _get_setting("MAX_REQUEST_JSON_CHARS", MAX_REQUEST_JSON_CHARS)
+    size_validator = _get_setting("validate_request_json_size", validate_request_json_size)
+    size_validator(body, max_chars=max_req_chars)
+
+    body_validator = _get_setting("_validate_responses_request_body") or _get_setting(
+        "validate_responses_request_body", validate_responses_request_body
+    )
+    body_validator(body)
+
+    rate_limiter = _get_setting("_enforce_chat_rate_limit") or _get_setting(
+        "enforce_chat_rate_limit", enforce_chat_rate_limit
+    )
+    rate_limiter(request, key)
+
+    debug_dumps = _get_setting("DEBUG_DUMPS", False)
+    if debug_dumps:
+        _dump_path = Path(__file__).resolve().parent.parent / "last_responses_request.json"
+        try:
+            with open(_dump_path, "w", encoding="utf-8") as _f:
+                json.dump(redact_sensitive(body), _f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    normalizer = _get_setting("normalize_responses_request", normalize_responses_request)
+    model, messages, tools, tool_choice, optional = normalizer(body)
+    want_stream = bool(body.get("stream"))
+
+    if "extra_body" in body and "tailoredAiId" in body["extra_body"]:
+        optional["extra_body"] = {"tailoredAiId": body["extra_body"]["tailoredAiId"]}
+
+    cost_cache_fn = _get_setting("_get_cost_cache_with_lazy_refresh") or _get_setting(
+        "get_cost_cache_with_lazy_refresh", get_cost_cache_with_lazy_refresh
+    )
+    cost_cache = cost_cache_fn()
+    cost_headers_fn = _get_setting("_build_cost_headers") or _get_setting("build_cost_headers", build_cost_headers)
+    response_headers = cost_headers_fn(cost_cache)
+
+    try:
+        result = await _execute_completion_pipeline(
+            model=model,
+            messages=messages,
+            tools=tools,
+            tool_choice=tool_choice,
+            optional_params=optional,
+            stream=want_stream,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Responses completion failed: model={model} error={e}")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    if want_stream:
+        stream_delay_ms = _get_setting("STREAM_CHUNK_DELAY_MS", STREAM_CHUNK_DELAY_MS)
+        sse_builder = _get_setting("build_responses_sse_events", build_responses_sse_events)
+        return StreamingResponse(
+            sse_builder(
+                completion_id=result.completion_id,
+                created_ts=result.created_ts,
+                model=result.model,
+                content=result.content,
+                tool_calls_data=result.tool_calls_data,
+                usage=result.usage,
+                delay_ms=stream_delay_ms,
+            ),
+            media_type="text/event-stream",
+            headers=response_headers,
+        )
+
+    output_builder = _get_setting("build_responses_output", build_responses_output)
+    return JSONResponse(
+        content=output_builder(
+            completion_id=result.completion_id,
+            created_ts=result.created_ts,
+            model=result.model,
+            content=result.content,
+            tool_calls_data=result.tool_calls_data,
+            usage=result.usage,
+        ),
         headers=response_headers,
     )
 
@@ -524,6 +686,7 @@ def create_app() -> FastAPI:
     application.get("/internal/cost-status")(cost_status)
     application.get("/v1/models")(list_models)
     application.post("/v1/chat/completions")(chat_completions)
+    application.post("/v1/responses")(responses)
 
     return application
 
@@ -541,4 +704,6 @@ __all__ = [
     "cost_status",
     "list_models",
     "chat_completions",
+    "responses",
+    "CanonicalResult",
 ]
