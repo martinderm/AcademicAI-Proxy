@@ -30,3 +30,4 @@ Thumbs.db
 /data/**/*.json
 skill_snippets.json
 .env.localtest
+openchamber.pid

@@ -16,6 +16,7 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 - E2E Test Port Isolation (runs on port 11436): ✅
 - Automatic Prompt Caching Compatibility (Azure prefix caching): ✅
 - Modular Domain Architecture & Modern ASGI Lifespan (`academicai.app`): ✅
+- OpenCode & OpenChamber Web/Mobile Harness (Tailscale): ✅ (see [docs/opencode-openchamber.md](docs/opencode-openchamber.md))
 
 ### Caching and Costs Status
 
@@ -436,6 +437,7 @@ academicai-proxy/
     architecture/        # Concept & modularization architecture docs
     archive/             # Legacy archive artifacts
     codex.md             # OpenAI Codex CLI & Desktop setup guide
+    opencode-openchamber.md # OpenCode & OpenChamber Web/Mobile (Tailscale) setup guide
     system-map/          # ICM-aligned agent architecture map
     tenant-template/     # Environment templates
   server.py              # Slim CLI runner & compatibility layer
