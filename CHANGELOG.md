@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1 - 2026-09-12
+
+### ⚙️ Multi-Model Compatibility & Token Limit Auto-Stripping
+- **Gemini & O3 Token Limit Auto-Stripping**: Automatically strip `max_tokens` / `max_completion_tokens` for Google Gemini models (`gemini-*`) and OpenAI `o3` in `academicai/transformation.py` to bypass upstream HTTP 500 errors (`internalErrorCode: 605`).
+- **Reasoning Model Alignment**: Refined `reasoningEffort` injection when `temperature` is present to target only models that mandate it (`claude-opus-4-6`, `gpt-5.2`, `gpt-5.5`), ensuring `claude-opus-4-8` and `o3` function without validation errors.
+- **100% Model Connectivity Verification**: All 16 active models in the AcademicAI catalog (`claude-opus-4-8`, `gpt-5.5`, `o3`, `gemini-3.5-flash`, etc.) verified working across both non-streaming and streaming calls via `test_models_connectivity.py`.
+- **Unit Tests**: Added automated tests for parameter filtering and token limit auto-stripping in `tests/test_transformation_sticky_system.py`.
+
 ## 0.7 - 2026-09-11
 
 ### 🤖 OpenAI Codex & Responses API
