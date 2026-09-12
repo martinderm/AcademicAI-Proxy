@@ -129,9 +129,22 @@ from .humanization import (  # noqa: F401
     run_humanization_pass,
     _run_humanization_pass,
 )
+from .errors import (  # noqa: F401
+    AcademicAIError,
+    AuthenticationError,
+    PermissionDeniedError,
+    QuotaExceededError,
+    NotFoundError,
+    BadRequestError,
+    ServiceUnavailableError,
+    map_error,
+)
 
 __all__ = [
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
+    "AcademicAIError", "AuthenticationError", "PermissionDeniedError",
+    "QuotaExceededError", "NotFoundError", "BadRequestError",
+    "ServiceUnavailableError", "map_error",
     "Settings", "get_settings", "validate_config",
     "validate_chat_request_body", "_validate_chat_request_body",
     "validate_responses_request_body", "_validate_responses_request_body",

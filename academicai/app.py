@@ -42,6 +42,7 @@ from academicai.cost_monitoring import (
     get_cost_cache_with_lazy_refresh,
     get_cost_status_payload,
 )
+from academicai.errors import AcademicAIError
 from academicai.humanization import (
     is_human_readable_target,
     last_user_text,
@@ -276,6 +277,8 @@ async def list_models(key: str = Depends(verify_key)):
         if inspect.iscoroutinefunction(models_fn):
             return await models_fn()
         return await run_in_threadpool(models_fn)
+    except (HTTPException, AcademicAIError):
+        raise
     except Exception as e:
         log.error(f"get_models failed: {e}")
         raise HTTPException(status_code=502, detail=str(e))
@@ -512,7 +515,7 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
             optional_params=optional,
             stream=want_stream,
         )
-    except HTTPException:
+    except (HTTPException, AcademicAIError):
         raise
     except Exception as e:
         log.error(f"completion failed: model={model} error={e}")
@@ -630,7 +633,7 @@ async def responses(request: Request, key: str = Depends(verify_key)):
             optional_params=optional,
             stream=want_stream,
         )
-    except HTTPException:
+    except (HTTPException, AcademicAIError):
         raise
     except Exception as e:
         log.error(f"Responses completion failed: model={model} error={e}")
@@ -681,6 +684,34 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan,
     )
+
+    @application.exception_handler(AcademicAIError)
+    async def academicai_error_handler(request: Request, exc: AcademicAIError):
+        headers = None
+        try:
+            cache_fn = _get_setting("_get_cost_cache_with_lazy_refresh") or _get_setting(
+                "get_cost_cache_with_lazy_refresh", get_cost_cache_with_lazy_refresh
+            )
+            cost_headers_fn = _get_setting("_build_cost_headers") or _get_setting(
+                "build_cost_headers", build_cost_headers
+            )
+            cache = cache_fn()
+            headers = cost_headers_fn(cache)
+        except Exception:
+            pass
+
+        return JSONResponse(
+            status_code=exc.status_code if exc.status_code else 502,
+            content={
+                "error": {
+                    "message": exc.message,
+                    "type": exc.error_type,
+                    "param": exc.param,
+                    "code": exc.error_code,
+                }
+            },
+            headers=headers,
+        )
 
     application.get("/health")(health)
     application.get("/internal/cost-status")(cost_status)

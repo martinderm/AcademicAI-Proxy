@@ -27,6 +27,16 @@ import uvicorn
 import academicai
 from academicai.auth import get_base_url, get_headers
 from academicai.security import redact_sensitive
+from academicai.errors import (
+    AcademicAIError,
+    AuthenticationError,
+    PermissionDeniedError,
+    QuotaExceededError,
+    NotFoundError,
+    BadRequestError,
+    ServiceUnavailableError,
+    map_error,
+)
 
 from academicai.transformation import (
     extract_text_content,

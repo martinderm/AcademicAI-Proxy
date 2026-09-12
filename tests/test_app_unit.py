@@ -244,6 +244,9 @@ def test_backward_compatibility_server_and_academicai_reexports():
         "_apply_post_tool_guard",
         "extract_text_content",
         "_extract_text_content",
+        "AcademicAIError",
+        "QuotaExceededError",
+        "map_error",
     ]
 
     for sym in server_symbols:
@@ -254,6 +257,9 @@ def test_backward_compatibility_server_and_academicai_reexports():
         "_apply_post_tool_guard",
         "extract_text_content",
         "_extract_text_content",
+        "AcademicAIError",
+        "QuotaExceededError",
+        "map_error",
     ]
 
     for sym in package_symbols:
@@ -292,6 +298,7 @@ def test_isolated_module_imports_without_server():
         "academicai.logging_config",
         "academicai.humanization",
         "academicai.responses",
+        "academicai.errors",
         "academicai.app",
         "academicai",
     ]
@@ -300,3 +307,148 @@ def test_isolated_module_imports_without_server():
         cmd = [sys.executable, "-c", f"import sys; import {mod}; assert 'server' not in sys.modules"]
         res = subprocess.run(cmd, capture_output=True, text=True)
         assert res.returncode == 0, f"Module {mod} failed isolated import test: {res.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# 5. Error Mapping & OpenAI Format Exception Handler Tests
+# ---------------------------------------------------------------------------
+
+
+def test_quota_exceeded_error_defaults():
+    from academicai.errors import QuotaExceededError
+    err = QuotaExceededError("Budget exhausted")
+    assert err.status_code == 429
+    assert err.error_code == "insufficient_quota"
+    assert err.error_type == "insufficient_quota"
+    assert err.message == "Budget exhausted"
+
+
+def test_map_error_internal_error_code_201():
+    from academicai.errors import map_error, QuotaExceededError
+    upstream_payload = {
+        "message": "API request failed",
+        "meta": {
+            "error": {
+                "internalErrorCode": 201,
+                "message": "API Client Error: Cost limit reached",
+            }
+        },
+    }
+    err = map_error(403, upstream_payload)
+    assert isinstance(err, QuotaExceededError)
+    assert err.status_code == 429
+    assert err.error_code == "insufficient_quota"
+    assert err.error_type == "insufficient_quota"
+    assert "Cost limit reached" in err.message
+
+
+def test_map_error_cost_limit_string_detection():
+    from academicai.errors import map_error, QuotaExceededError
+    err = map_error(400, {"message": "User cost limit exceeded for this billing period"})
+    assert isinstance(err, QuotaExceededError)
+    assert err.status_code == 429
+
+
+def test_map_error_status_429():
+    from academicai.errors import map_error, QuotaExceededError
+    err = map_error(429, {"message": "Too many requests"})
+    assert isinstance(err, QuotaExceededError)
+    assert err.status_code == 429
+
+
+def test_map_error_kb_unavailable():
+    from academicai.errors import map_error, ServiceUnavailableError
+    err = map_error(500, {"code": "KB_UNAVAILABLE", "message": "Knowledge Base is down"})
+    assert isinstance(err, ServiceUnavailableError)
+    assert err.error_code == "kb_unavailable"
+
+
+def test_map_error_standard_status_codes():
+    from academicai.errors import (
+        map_error,
+        AuthenticationError,
+        PermissionDeniedError,
+        NotFoundError,
+        BadRequestError,
+        ServiceUnavailableError,
+    )
+    assert isinstance(map_error(401, {"message": "Invalid key"}), AuthenticationError)
+    assert isinstance(map_error(403, {"message": "Forbidden"}), PermissionDeniedError)
+    assert isinstance(map_error(404, {"message": "Not found"}), NotFoundError)
+    assert isinstance(map_error(422, {"message": "Validation failed"}), BadRequestError)
+    assert isinstance(map_error(503, {"message": "Service unavailable"}), ServiceUnavailableError)
+
+
+def test_chat_completion_quota_exceeded_returns_429_openai_format(monkeypatch):
+    from academicai.errors import QuotaExceededError
+    from fastapi.testclient import TestClient
+    import server
+
+    def _mock_completion(*args, **kwargs):
+        raise QuotaExceededError("AcademicAI Cost Limit Reached: API Client Error: Cost limit reached")
+
+    monkeypatch.setattr(server.academicai, "completion", _mock_completion)
+    client = TestClient(server.app)
+
+    payload = {"model": "gpt-5-mini", "messages": [{"role": "user", "content": "hello"}]}
+    resp = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {server.API_KEY}"},
+        json=payload,
+    )
+
+    assert resp.status_code == 429
+    data = resp.json()
+    assert "error" in data
+    assert data["error"]["code"] == "insufficient_quota"
+    assert data["error"]["type"] == "insufficient_quota"
+    assert "Cost limit reached" in data["error"]["message"]
+    assert data["error"]["param"] is None
+
+
+def test_responses_api_quota_exceeded_returns_429_openai_format(monkeypatch):
+    from academicai.errors import QuotaExceededError
+    from fastapi.testclient import TestClient
+    import server
+
+    def _mock_completion(*args, **kwargs):
+        raise QuotaExceededError("AcademicAI Cost Limit Reached: API Client Error: Cost limit reached")
+
+    monkeypatch.setattr(server.academicai, "completion", _mock_completion)
+    client = TestClient(server.app)
+
+    payload = {"model": "gpt-5-mini", "input": "hello"}
+    resp = client.post(
+        "/v1/responses",
+        headers={"Authorization": f"Bearer {server.API_KEY}"},
+        json=payload,
+    )
+
+    assert resp.status_code == 429
+    data = resp.json()
+    assert "error" in data
+    assert data["error"]["code"] == "insufficient_quota"
+    assert data["error"]["type"] == "insufficient_quota"
+    assert "Cost limit reached" in data["error"]["message"]
+
+
+def test_list_models_quota_exceeded_returns_429_openai_format(monkeypatch):
+    from academicai.errors import QuotaExceededError
+    from fastapi.testclient import TestClient
+    import server
+
+    def _mock_get_models():
+        raise QuotaExceededError("AcademicAI Cost Limit Reached: API Client Error: Cost limit reached")
+
+    monkeypatch.setattr(server.academicai, "get_models", _mock_get_models)
+    client = TestClient(server.app)
+
+    resp = client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {server.API_KEY}"},
+    )
+
+    assert resp.status_code == 429
+    data = resp.json()
+    assert "error" in data
+    assert data["error"]["code"] == "insufficient_quota"
