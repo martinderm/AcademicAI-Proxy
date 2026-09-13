@@ -17,12 +17,14 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 - E2E Test Port Isolation (runs on port 11436): ✅
 - Automatic Prompt Caching Compatibility (Azure prefix caching): ✅
 - Modular Domain Architecture & Modern ASGI Lifespan (`academicai.app`): ✅
+- Tiered Context Pricing & 128k Boundary Protection: ✅ (Structured ascending tiers, baseline rate guarantee, 128k client protection)
 - OpenCode & OpenChamber Web/Mobile Harness (Tailscale): ✅ (see [docs/opencode-openchamber.md](docs/opencode-openchamber.md))
 
 ### Caching and Costs Status
 
 - **Automatic Prefix Caching**: ✅ Supported natively. The proxy is aligned to merge system instructions at the very beginning of the first user message, maximizing Azure OpenAI prefix cache hit rates.
 - **Autonomous Local Cost Calculation**: ✅ Fully operational. The proxy dynamically caches model pricing from `/api/v1/llm/models`, calculates exact request costs via `Decimal` arithmetic, injects standardized response headers, and maintains persistent local aggregations (`today`, `this_month`, `all_time`, `by_model`, `by_client`).
+- **Tiered Context Pricing & 128k Boundary Protection**: ✅ Upstream pricing tiers (Google Vertex AI / Azure OpenAI ShortCo $\le 128\text{k}$ vs LongCo $> 128\text{k}$) are structured into ascending tiers in `ModelCatalog`, with baseline rates guaranteed and official sources documented. The client recommendation `context: 128000` secures 100% Tier 1 rates.
 - **AcademicAI Backend Cost Endpoint (`/api/v1/cost/`)**: 🔴 (Returns `403 Forbidden` due to tenant permissions `ACCESS_API_MONITOR_CREDIT`). Local tracking completely bypasses this limitation.
 
 ## Why this proxy exists

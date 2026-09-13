@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.2 - 2026-09-13
+
+### 🛡️ Structured Pricing Tiers & 128k Context Boundary Documentation
+- **Sorted Model Pricing Tiers (`academicai/cost_calculation.py`)**:
+  - `ModelPricing` now structures and serializes tiered models into an ascending `tiers` array (Tier 1: `short_context` with `max_prompt_tokens = 128000`, Tier 2: `long_context`).
+  - Strict minimum/baseline rate selection (`input_rates[0]`, `output_rates[0]`) guarantees that baseline rates are always utilized regardless of upstream array sorting.
+  - Normalized rates corrected for `gpt-5.5` (€ 0.033 / 1k tokens) and `gemini-2.5-pro` (€ 0.00125 / 1k tokens).
+- **Upstream Tariff Research & Source Documentation**:
+  - Researched and verified official pricing boundaries for Google Cloud Vertex AI / AI Studio (Gemini Pro $\le 128\text{k}$ vs $> 128\text{k}$) and Microsoft Azure OpenAI (`ShortCo` $\le 128\text{k}$ vs `LongCo` $> 128\text{k}$ input tokens).
+  - Documented boundaries and primary sources with clickable links in `README.md`, `docs/opencode-openchamber.md`, and `docs/system-map/objects.md`.
+- **Client Recommendation Alignment**:
+  - Standardized client context window recommendations on 128k (`limit.context: 128000`) across OpenCode, OpenChamber, and documentation to guarantee 100% Tier 1 baseline billing and prevent accidental long-context surcharges.
+- **Unit Tests**:
+  - Added unit tests in `tests/test_cost_calculation_unit.py` verifying ascending tier construction, reverse-order upstream parsing, and minimum rate selection.
+
 ## 0.8.1 - 2026-09-13
 
 ### 📋 Persistent 24h Model Catalog & Zero-Latency Discovery

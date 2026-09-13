@@ -11,6 +11,8 @@ Schnellstart:
 
 from .provider import AcademicAIProvider, CompletionResponse
 
+__version__ = "0.8.2"
+
 _provider: AcademicAIProvider | None = None
 
 
@@ -154,6 +156,7 @@ from .errors import (  # noqa: F401
 )
 
 __all__ = [
+    "__version__",
     "AcademicAIProvider", "CompletionResponse", "completion", "get_models",
     "AcademicAIError", "AuthenticationError", "PermissionDeniedError",
     "QuotaExceededError", "NotFoundError", "BadRequestError",
