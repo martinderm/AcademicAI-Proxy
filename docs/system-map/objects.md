@@ -257,7 +257,7 @@ Kapselt die vollkommen autonome, anfragegenaue Kostenermittlung ohne Abhängigke
   - **Strukturierte, sortierte Tiers (`tiers`):** Sämtliche Tarifstufen werden aufsteigend sortiert im Modellobjekt gespeichert:
     - **Tier 1 (`short_context`):** $\le 128\text{k}$ Prompt-Tokens (`max_prompt_tokens: 128000`) mit dem Basis-Tarif.
     - **Tier 2 (`long_context`):** $> 128\text{k}$ Prompt-Tokens (`max_prompt_tokens: context_window`) mit den erhöhten Upstream-Raten.
-    - Entspricht den Upstream-Tarifmodellen von Google Cloud Vertex AI (Gemini Pro) und Microsoft Azure OpenAI (GPT-5.5 ShortCo vs. LongCo).
+    - Entspricht den Upstream-Tarifmodellen von Google Cloud ([Vertex AI](https://cloud.google.com/vertex-ai/generative-ai/pricing#gemini-models), [AI Studio](https://ai.google.dev/pricing) für Gemini Pro) und Microsoft Azure ([Azure OpenAI Pricing](https://azure.microsoft.com/en-us/pricing/details/azure-openai/), [Foundry Concepts](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?pivots=azure-openai#short-context-and-long-context), [Retail Prices API](https://prices.azure.com/api/retail/prices) für GPT-5.5 ShortCo vs. LongCo).
   - Parst und serialisiert zudem Modellmetadaten wie `context_window` (`contextWindow`) und `output_token_limit` (`outputTokenLimit`).
 - **Thread- und Async-sicherer Katalog (`ModelCatalog`):**
   - Gesteuert über `MODEL_CATALOG_TTL_SECONDS` (Default: 86400s / 24 Stunden) und `MODEL_CATALOG_FILE` (Default: `"data/model_catalog.json"`).
