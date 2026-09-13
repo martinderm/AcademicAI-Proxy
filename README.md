@@ -100,7 +100,33 @@ AcademicAI liefert über den Endpunkt `/api/v1/llm/models` die Kosteninformation
   $$\text{input\_rate} = \frac{\text{cost}}{1000}, \quad \text{output\_rate} = \frac{\text{cost}}{1000}$$
   $$\text{request\_cost} = (\text{prompt\_tokens} \times \text{input\_rate}) + (\text{completion\_tokens} \times \text{output\_rate}) + \text{per\_request\_cost}$$
 - **Hochpräzise Arithmetik:** Sämtliche Berechnungen erfolgen mit Pythons `Decimal`-Modul, um Rundungsfehler bei Mikro-Cents vollständig zu vermeiden.
-- **Kontext-Staffelung (Tiered Models):** Modelle mit mehreren Preisstufen (`gpt-5.5`, `gemini-2.5-pro`) nutzen die Basisstufe als Standard und markieren die Berechnung mit `X-AcademicAI-Cost-Estimated: true`.
+- **Kontext-Staffelung (Tiered Models):** Modelle mit mehreren Preisstufen (`gpt-5.5`, `gemini-2.5-pro`, `gemini-3.1-pro-preview`) nutzen die Basisstufe als Standard und markieren die Berechnung mit `X-AcademicAI-Cost-Estimated: true`.
+
+#### Upstream-Tarifgrenzen & Quellen (Tier-Schwellenwerte)
+
+AcademicAI aggregiert Modelle über Google Cloud (Vertex AI) und Microsoft Azure (Azure OpenAI Service). Für Modelle mit großem Kontextfenster (1M+) wenden die Upstream-Provider eine zweistufige Abrechnung an:
+
+1. **Google Gemini Pro (`gemini-2.5-pro`):**
+   - **Tarifschwelle:** Getrennt bei exakt **128k Tokens Prompt-Länge** (`128.000 Tokens`).
+   - **Basis-Stufe ($\le 128\text{k}$ Tokens):** Input € 1,25 / 1M Tokens (`0.00125` € / 1k), Output € 10,00 / 1M Tokens (`0.01` € / 1k).
+   - **Long-Context-Stufe ($> 128\text{k}$ Tokens):** Input € 2,50 / 1M Tokens (`0.0025` € / 1k, verdoppelt), Output € 15,00 / 1M Tokens (`0.015` € / 1k, 1,5x).
+   - **Quellen:**
+     - [Google Cloud Vertex AI Pricing — Gemini Models](https://cloud.google.com/vertex-ai/generative-ai/pricing#gemini-models)
+     - [Google AI Studio Developer API Pricing](https://ai.google.dev/pricing)
+
+2. **OpenAI via Microsoft Azure (`gpt-5.5`):**
+   - **Tarifschwelle & Definition:** Azure unterscheidet zwischen *Short Context* (`ShortCo`) und *Long Context* (`LongCo`). Laut Microsoft bezieht sich *Context* hierbei strikt auf die Anzahl der Input-Tokens des einzelnen Requests (*"number of input tokens in an individual request"*), nicht auf das Modell-Kontextfenster oder Output-Tokens.
+   - **Schwelle:** Anfragen bis **128k Input-Tokens** (`128.000 Tokens`) fallen unter *Short Context*; Anfragen mit **mehr als 128k Input-Tokens** unter *Long Context*.
+   - **Short-Context-Stufe ($\le 128\text{k}$ Tokens):** Input € 5,50 / 1M Tokens (`0.0055` € / 1k), Output € 33,00 / 1M Tokens (`0.033` € / 1k).
+   - **Long-Context-Stufe ($> 128\text{k}$ Tokens):** Input € 11,00 / 1M Tokens (`0.011` € / 1k, exakt 2x), Output € 49,50 / 1M Tokens (`0.0495` € / 1k, exakt 1,5x).
+   - **Quellen:**
+     - [Microsoft Foundry / Azure OpenAI Model Concepts — Short context and long context](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/concepts/models-sold-directly-by-azure?pivots=azure-openai#short-context-and-long-context)
+     - [Azure OpenAI Service Pricing](https://azure.microsoft.com/en-us/pricing/details/azure-openai/)
+     - [Azure Retail Prices API](https://prices.azure.com/api/retail/prices) (Meters `5.5 ShortCo inp Dz` / `5.5 LongCo inp Dz`).
+
+> [!NOTE]
+> **Abgrenzung: Abrechnungsschwelle (128k) vs. Client-Empfehlung (256k)**  
+> In unserer Client-Konfiguration für OpenCode/OpenChamber (siehe unten) empfehlen wir ein Cap von `limit.context: 256000` (256k), um gigantische Sessions vor 1M Tokens automatisch zu prunen. Bei Prompts zwischen 128k und 256k greift beim Provider bereits die Long-Context-Stufe (Tier 2). Wer garantiert immer im Basistarif bleiben möchte, setzt den Client auf `limit.context: 128000`.
 
 ### Response-Headers
 

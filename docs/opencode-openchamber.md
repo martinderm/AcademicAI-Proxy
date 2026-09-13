@@ -170,11 +170,15 @@ Bei benutzerdefinierten Providern (`@ai-sdk/openai-compatible`) kann OpenCode di
 > [!TIP]
 > **Praxis-Empfehlung: Kontextfenster großer Modelle auf 256k begrenzen (`context: 256000`)**
 > 
-> Obwohl Modelle wie `gpt-5.5` oder `claude-opus-4-8` im Backend bis zu 1 Million Tokens unterstützen, wird für den alltäglichen Einsatz in OpenCode dringend empfohlen, `limit.context` auf **`256000`** (256k) zu begrenzen:
+> Obwohl Modelle wie `gpt-5.5` oder `claude-opus-4-8` im Backend bis zu 1 Million Tokens unterstützen, wird für den alltäglichen Einsatz in OpenCode empfohlen, `limit.context` auf **`256000`** (256k) zu begrenzen:
 > - **Budget- & Kostenschutz:** Verhindert, dass bei langen iterativen Sessions unbemerkt mehrere Hunderttausend Tokens pro Request übertragen und vom Budget abgezogen werden.
 > - **Performance & Latenz:** Hält die Antwort- und Streamingzeiten spürbar kürzer.
 > - **Frühzeitige Kompaktierung (Pruning):** OpenCode fasst Chatverläufe rechtzeitig vor 256k zusammen, anstatt den Kontext bis an die Budgetgrenze anschwellen zu lassen.
 > - **Ausreichend Raum:** 256k Tokens entsprechen rund 800–1.000 Buchseiten Text – das genügt selbst für umfangreiche Repositories, Refactorings und Dokumentensammlungen vollkommen.
+> 
+> **Wichtiger Hinweis zum Upstream-Tarif (128k-Grenze):**  
+> Die Upstream-Provider Google (Vertex AI) und Microsoft (Azure OpenAI) staffeln ihre Tarife bei **128k Input-Tokens** (`128.000`). Prompts über 128k Tokens werden mit dem doppelten Input-Preis abgerechnet (z. B. bei `gpt-5.5` springt der Input von € 5,50 auf € 11,00 / 1M).  
+> *Wer strikt im Basis-Tarif bleiben möchte, setzt `context: 128000`.* Das 256k-Cap ist der empfohlene Mittelweg zwischen extrem großem Kontext und Schutz vor 1M-Überläufen.
 
 #### Referenztabelle aller AcademicAI-Modelle
 

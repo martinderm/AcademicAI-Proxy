@@ -253,7 +253,9 @@ Kapselt die vollkommen autonome, anfragegenaue Kostenermittlung ohne Abhängigke
 - **Einheiten-Normalisierung (`parse_model_costs`):**
   - AcademicAI liefert Preise im Feld `costs` pro **1.000 Tokens (1k Tokens)**.
   - Normalisierte Rate pro Einzeltoken: `Decimal(cost) / Decimal(1000)`.
-  - Bei gestaffelten Preisen (`costs` mit mehreren `input_tokens`/`output_tokens`-Einträgen) wird die Basisstufe gewählt und `is_tiered = True` gesetzt.
+  - Bei gestaffelten Preisen (`costs` mit mehreren `input_tokens`/`output_tokens`-Einträgen wie `gpt-5.5`, `gemini-2.5-pro`) wird die Basisstufe gewählt und `is_tiered = True` gesetzt. Die Staffelung entspricht der offiziellen **128k-Grenze** der Upstream-Provider:
+    - **Google Vertex AI / AI Studio (`gemini-2.5-pro`):** $\le 128\text{k}$ Prompt-Tokens Basisrate (€ 1,25 In / € 10,00 Out pro 1M); $> 128\text{k}$ verdoppelte Input-Rate (€ 2,50 In / € 15,00 Out).
+    - **Microsoft Azure OpenAI (`gpt-5.5`):** Unterscheidung zwischen *Short Context* ($\le 128\text{k}$ Input-Tokens; € 5,50 In / € 33,00 Out pro 1M) und *Long Context* ($> 128\text{k}$ Input-Tokens; € 11,00 In / € 49,50 Out pro 1M). Quelle: Microsoft Foundry Concepts (*"Short context and long context"*), Azure Pricing & Azure Retail Prices API.
   - Parst und serialisiert zudem Modellmetadaten wie `context_window` (`contextWindow`) und `output_token_limit` (`outputTokenLimit`).
 - **Thread- und Async-sicherer Katalog (`ModelCatalog`):**
   - Gesteuert über `MODEL_CATALOG_TTL_SECONDS` (Default: 86400s / 24 Stunden) und `MODEL_CATALOG_FILE` (Default: `"data/model_catalog.json"`).
