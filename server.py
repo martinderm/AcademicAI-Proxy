@@ -109,6 +109,8 @@ from academicai.config import (
     ENABLE_LOCAL_COST_TRACKING,
     MODEL_PRICING_CACHE_TTL_SECONDS,
     MODEL_PRICING_CACHE_FILE,
+    MODEL_CATALOG_FILE,
+    MODEL_CATALOG_TTL_SECONDS,
     LOCAL_COST_CACHE_FILE,
     LOCAL_COST_HISTORY_LIMIT,
     COST_CURRENCY,
@@ -165,14 +167,18 @@ from academicai.cost_monitoring import (
 
 from academicai.cost_calculation import (
     calculate_request_cost,
+    get_model_catalog,
     get_pricing_cache,
+    ModelCatalog,
     ModelPricingCache,
+    ModelEntry,
     ModelPricing,
     RequestCost,
     parse_model_costs,
 )
 _calculate_request_cost = calculate_request_cost
 _get_pricing_cache = get_pricing_cache
+_get_model_catalog = get_model_catalog
 
 from academicai.local_cost_tracker import (
     get_local_cost_store,

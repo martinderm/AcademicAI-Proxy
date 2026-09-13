@@ -10,11 +10,14 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from academicai.cost_calculation import (
+    ModelCatalog,
+    ModelEntry,
     ModelPricing,
     ModelPricingCache,
     RequestCost,
     calculate_request_cost,
     parse_model_costs,
+    get_model_catalog,
     get_pricing_cache,
 )
 
@@ -355,5 +358,106 @@ def test_model_pricing_cache_currency_ssot(tmp_path):
     cost = calculate_request_cost("gpt-4o", 100, 50, pricing_cache=cache2)
     assert cost.currency == "USD"
     assert cost.to_headers()["X-AcademicAI-Cost-Currency"] == "USD"
+
+
+def test_parse_model_costs_with_metadata():
+    raw_costs = [
+        {"costType": "input_tokens", "cost": 0.0025},
+        {"costType": "output_tokens", "cost": 0.010},
+    ]
+    entry = parse_model_costs(
+        "gpt-5",
+        raw_costs,
+        context_window=1048576,
+        output_token_limit=65535,
+    )
+    assert entry.model_id == "gpt-5"
+    assert entry.context_window == 1048576
+    assert entry.output_token_limit == 65535
+    assert "context_window=1048576" in repr(entry)
+
+    # Serialization roundtrip
+    d = entry.to_dict()
+    assert d["context_window"] == 1048576
+    assert d["output_token_limit"] == 65535
+
+    restored = ModelEntry.from_dict(d)
+    assert restored.model_id == "gpt-5"
+    assert restored.context_window == 1048576
+    assert restored.output_token_limit == 65535
+
+
+def test_model_catalog_to_openai_models_response(tmp_path):
+    catalog_file = tmp_path / "catalog_test.json"
+    catalog = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400)
+    catalog._pricing_map = {
+        "gpt-5": ModelEntry(
+            model_id="gpt-5",
+            input_cost_per_token=Decimal("0.0000025"),
+            output_cost_per_token=Decimal("0.00001"),
+            per_request_cost=Decimal("0"),
+            currency="EUR",
+            is_tiered=False,
+            raw_costs=[{"costType": "input_tokens", "cost": 0.0025}],
+            context_window=1048576,
+            output_token_limit=65535,
+        ),
+        "gpt-5-mini": ModelEntry(
+            model_id="gpt-5-mini",
+            input_cost_per_token=Decimal("0.00000028"),
+            output_cost_per_token=Decimal("0.0000022"),
+            per_request_cost=Decimal("0"),
+            currency="EUR",
+            is_tiered=False,
+            raw_costs=[{"costType": "input_tokens", "cost": 0.00028}],
+            context_window=400000,
+            output_token_limit=128000,
+        ),
+    }
+
+    resp = catalog.to_openai_models_response()
+    assert resp["object"] == "list"
+    data = resp["data"]
+    assert len(data) == 2
+
+    m_map = {item["id"]: item for item in data}
+    assert "gpt-5" in m_map
+    assert m_map["gpt-5"]["object"] == "model"
+    assert m_map["gpt-5"]["owned_by"] == "academicai"
+    assert m_map["gpt-5"]["context_window"] == 1048576
+    assert m_map["gpt-5"]["max_tokens"] == 65535
+    assert len(m_map["gpt-5"]["costs"]) == 1
+
+    assert "gpt-5-mini" in m_map
+    assert m_map["gpt-5-mini"]["context_window"] == 400000
+    assert m_map["gpt-5-mini"]["max_tokens"] == 128000
+
+
+def test_model_catalog_get_model_and_get_models(tmp_path):
+    catalog_file = tmp_path / "catalog_test.json"
+    catalog = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400)
+    catalog._pricing_map = {
+        "gpt-4o": ModelEntry("gpt-4o", Decimal("0.00000275"), Decimal("0.000011"), Decimal("0"))
+    }
+    assert catalog.get_model("gpt-4o") is not None
+    assert catalog.get_model("unknown") is None
+    all_models = catalog.get_models()
+    assert "gpt-4o" in all_models
+    assert len(all_models) == 1
+
+
+def test_model_catalog_default_file_path(monkeypatch):
+    monkeypatch.delenv("ACADEMICAI_MODEL_CATALOG_FILE", raising=False)
+    monkeypatch.delenv("ACADEMICAI_MODEL_PRICING_CACHE_FILE", raising=False)
+    catalog = ModelCatalog()
+    assert catalog.cache_file_path.name == "model_catalog.json"
+    assert "data" in str(catalog.cache_file_path)
+
+
+def test_model_catalog_aliases():
+    assert ModelCatalog is ModelPricingCache
+    assert ModelEntry is ModelPricing
+    assert get_model_catalog is get_pricing_cache
+
 
 

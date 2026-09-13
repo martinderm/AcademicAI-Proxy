@@ -62,6 +62,8 @@ class ModelPricing:
         currency: Optional[str] = None,
         is_tiered: bool = False,
         raw_costs: Optional[list[dict[str, Any]]] = None,
+        context_window: Optional[int] = None,
+        output_token_limit: Optional[int] = None,
     ):
         self.model_id = model_id
         self.input_cost_per_token = input_cost_per_token
@@ -70,6 +72,8 @@ class ModelPricing:
         self._currency = currency
         self.is_tiered = is_tiered
         self.raw_costs = list(raw_costs or [])
+        self.context_window = context_window
+        self.output_token_limit = output_token_limit
 
     @property
     def currency(self) -> str:
@@ -90,6 +94,10 @@ class ModelPricing:
             "is_tiered": self.is_tiered,
             "raw_costs": self.raw_costs,
         }
+        if self.context_window is not None:
+            d["context_window"] = self.context_window
+        if self.output_token_limit is not None:
+            d["output_token_limit"] = self.output_token_limit
         if self._currency:
             d["currency"] = self._currency
         return d
@@ -97,6 +105,8 @@ class ModelPricing:
     @classmethod
     def from_dict(cls, data: dict[str, Any], default_currency: Optional[str] = None) -> "ModelPricing":
         curr = data.get("currency") or default_currency
+        ctx_win = data.get("context_window")
+        out_lim = data.get("output_token_limit")
         return cls(
             model_id=str(data.get("model_id", "")),
             input_cost_per_token=Decimal(str(data.get("input_cost_per_token", "0"))),
@@ -105,11 +115,15 @@ class ModelPricing:
             currency=curr,
             is_tiered=bool(data.get("is_tiered", False)),
             raw_costs=list(data.get("raw_costs", [])),
+            context_window=int(ctx_win) if ctx_win is not None else None,
+            output_token_limit=int(out_lim) if out_lim is not None else None,
         )
 
     def __repr__(self) -> str:
         return (
             f"ModelPricing(model_id={self.model_id!r}, "
+            f"context_window={self.context_window}, "
+            f"output_token_limit={self.output_token_limit}, "
             f"input_cost_per_token={self.input_cost_per_token}, "
             f"output_cost_per_token={self.output_cost_per_token}, "
             f"per_request_cost={self.per_request_cost}, "
@@ -118,9 +132,17 @@ class ModelPricing:
         )
 
 
-def parse_model_costs(model_id: str, raw_costs: list[dict[str, Any]]) -> ModelPricing:
+ModelEntry = ModelPricing  # Alias for unified catalog terminology
+
+
+def parse_model_costs(
+    model_id: str,
+    raw_costs: list[dict[str, Any]],
+    context_window: Optional[int] = None,
+    output_token_limit: Optional[int] = None,
+) -> ModelPricing:
     """
-    Parses AcademicAI's costs array.
+    Parses AcademicAI's costs array and model metadata.
     AcademicAI reports input_tokens and output_tokens costs per 1,000 tokens (1k tokens).
     Normalized rate per single token = Decimal(cost) / Decimal(1000).
     """
@@ -159,6 +181,8 @@ def parse_model_costs(model_id: str, raw_costs: list[dict[str, Any]]) -> ModelPr
         currency=None,
         is_tiered=is_tiered,
         raw_costs=list(raw_costs),
+        context_window=context_window,
+        output_token_limit=output_token_limit,
     )
 
 
@@ -245,10 +269,10 @@ def calculate_request_cost(
     )
 
 
-class ModelPricingCache:
+class ModelCatalog:
     """
-    Thread-safe and async-safe cache for AcademicAI model pricing.
-    Single Source of Truth (SSOT) for model prices and cost currency.
+    Thread-safe and async-safe persistent catalog for AcademicAI models and pricing.
+    Single Source of Truth (SSOT) for registered models, token limits, and cost currency.
     """
 
     def __init__(
@@ -283,19 +307,35 @@ class ModelPricingCache:
     def cache_file_path(self) -> Path:
         if self._explicit_file is not None:
             return Path(self._explicit_file)
-        val = _get_setting("MODEL_PRICING_CACHE_FILE", "data/model_pricing_cache.json")
+        val = _get_setting(
+            "MODEL_CATALOG_FILE",
+            _get_setting("MODEL_PRICING_CACHE_FILE", "data/model_catalog.json"),
+        )
         return Path(val)
 
     @property
     def ttl_seconds(self) -> int:
         if self._explicit_ttl is not None:
             return self._explicit_ttl
-        return int(_get_setting("MODEL_PRICING_CACHE_TTL_SECONDS", 86400))
+        val = _get_setting(
+            "MODEL_CATALOG_TTL_SECONDS",
+            _get_setting("MODEL_PRICING_CACHE_TTL_SECONDS", 86400),
+        )
+        return int(val)
 
     def _load_from_disk(self) -> None:
         p = self.cache_file_path
         if not p.exists():
-            return
+            # Check migration fallback only when using the default catalog path
+            if self._explicit_file is None:
+                fallback = Path("data/model_pricing_cache.json")
+                if fallback.exists() and fallback != p:
+                    p = fallback
+                else:
+                    return
+            else:
+                return
+
         with self._lock:
             try:
                 raw = json.loads(p.read_text(encoding="utf-8"))
@@ -315,7 +355,7 @@ class ModelPricingCache:
                         if isinstance(v, dict):
                             self._pricing_map[k] = ModelPricing.from_dict(v, default_currency=self._currency)
             except Exception as e:
-                log.warning(f"failed to load model pricing cache from disk: {e}")
+                log.warning(f"failed to load model catalog from disk: {e}")
 
     def _save_to_disk(self) -> None:
         p = self.cache_file_path
@@ -368,7 +408,7 @@ class ModelPricingCache:
                         temp_path.unlink()
                     except OSError:
                         pass
-                log.warning(f"failed to save model pricing cache to disk: {e}")
+                log.warning(f"failed to save model catalog to disk: {e}")
 
     def is_stale(self) -> bool:
         with self._lock:
@@ -381,6 +421,39 @@ class ModelPricingCache:
         with self._lock:
             return self._pricing_map.get(model_id)
 
+    def get_model(self, model_id: str) -> Optional[ModelPricing]:
+        return self.get_pricing(model_id)
+
+    def get_models(self) -> dict[str, ModelPricing]:
+        with self._lock:
+            return dict(self._pricing_map)
+
+    def to_openai_models_response(self) -> dict[str, Any]:
+        """
+        Formats the local catalog into a standard OpenAI /v1/models response.
+        """
+        with self._lock:
+            models_list: list[dict[str, Any]] = []
+            for m_id, entry in self._pricing_map.items():
+                item: dict[str, Any] = {
+                    "id": entry.model_id,
+                    "object": "model",
+                    "created": 0,
+                    "owned_by": "academicai",
+                }
+                if entry.context_window is not None:
+                    item["context_window"] = entry.context_window
+                if entry.output_token_limit is not None:
+                    item["max_tokens"] = entry.output_token_limit
+                if entry.raw_costs:
+                    item["costs"] = entry.raw_costs
+                models_list.append(item)
+
+            return {
+                "object": "list",
+                "data": models_list,
+            }
+
     def get_pricing_with_refresh(self, model_id: str) -> Optional[ModelPricing]:
         if self.is_stale() and not self._refresh_in_flight:
             try:
@@ -391,7 +464,7 @@ class ModelPricingCache:
                 try:
                     self.refresh_sync()
                 except Exception as e:
-                    log.warning(f"synchronous pricing refresh failed, falling back to cache: {e}")
+                    log.warning(f"synchronous model catalog refresh failed, falling back to cache: {e}")
 
         return self.get_pricing(model_id)
 
@@ -405,7 +478,7 @@ class ModelPricingCache:
             try:
                 await run_in_threadpool(self.refresh_sync)
             except Exception as e:
-                log.warning(f"background model pricing refresh failed: {e}")
+                log.warning(f"background model catalog refresh failed: {e}")
             finally:
                 with self._lock:
                     self._refresh_in_flight = False
@@ -445,8 +518,14 @@ class ModelPricingCache:
             if not m_id:
                 continue
             raw_costs = m.get("costs") or []
-            if isinstance(raw_costs, list):
-                fresh_map[str(m_id)] = parse_model_costs(str(m_id), raw_costs)
+            ctx_win = m.get("contextWindow")
+            out_lim = m.get("outputTokenLimit")
+            fresh_map[str(m_id)] = parse_model_costs(
+                str(m_id),
+                raw_costs if isinstance(raw_costs, list) else [],
+                context_window=int(ctx_win) if ctx_win is not None else None,
+                output_token_limit=int(out_lim) if out_lim is not None else None,
+            )
 
         return fresh_map
 
@@ -468,16 +547,24 @@ class ModelPricingCache:
                 "ttl_seconds": self.ttl_seconds,
                 "currency": self.currency,
                 "cache_file": str(self.cache_file_path),
+                "catalog_file": str(self.cache_file_path),
             }
 
 
-_pricing_cache: Optional[ModelPricingCache] = None
-_pricing_cache_lock = threading.RLock()
+# Backward-compatible aliases
+ModelPricingCache = ModelCatalog
+
+_model_catalog: Optional[ModelCatalog] = None
+_model_catalog_lock = threading.RLock()
 
 
-def get_pricing_cache() -> ModelPricingCache:
-    global _pricing_cache
-    with _pricing_cache_lock:
-        if _pricing_cache is None:
-            _pricing_cache = ModelPricingCache()
-        return _pricing_cache
+def get_model_catalog() -> ModelCatalog:
+    global _model_catalog
+    with _model_catalog_lock:
+        if _model_catalog is None:
+            _model_catalog = ModelCatalog()
+        return _model_catalog
+
+
+# Backward-compatible alias
+get_pricing_cache = get_model_catalog

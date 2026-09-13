@@ -48,6 +48,10 @@ def test_default_values_when_no_env_vars():
     assert settings.STREAM_CHUNK_DELAY_MS == 0
     assert settings.DEBUG_DUMPS is False
     assert settings.ALLOWED_MODELS == ["gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5-mini"]
+    assert settings.MODEL_CATALOG_FILE == "data/model_catalog.json"
+    assert settings.MODEL_CATALOG_TTL_SECONDS == 86400
+    assert settings.MODEL_PRICING_CACHE_FILE == "data/model_catalog.json"
+    assert settings.MODEL_PRICING_CACHE_TTL_SECONDS == 86400
 
 
 def test_custom_env_vars_override_defaults():
@@ -72,6 +76,8 @@ def test_custom_env_vars_override_defaults():
         "ACADEMICAI_STREAM_CHUNK_DELAY_MS": "25",
         "ACADEMICAI_DEBUG_DUMPS": "true",
         "ACADEMICAI_ALLOWED_MODELS": "gpt-4o,gpt-custom-test",
+        "ACADEMICAI_MODEL_CATALOG_FILE": "custom/catalog.json",
+        "ACADEMICAI_MODEL_CATALOG_TTL_SECONDS": "3600",
     }
     settings = Settings.from_env(custom_env)
 
@@ -94,6 +100,10 @@ def test_custom_env_vars_override_defaults():
     assert settings.STREAM_CHUNK_DELAY_MS == 25
     assert settings.DEBUG_DUMPS is True
     assert settings.ALLOWED_MODELS == ["gpt-4o", "gpt-custom-test"]
+    assert settings.MODEL_CATALOG_FILE == "custom/catalog.json"
+    assert settings.MODEL_CATALOG_TTL_SECONDS == 3600
+    assert settings.MODEL_PRICING_CACHE_FILE == "custom/catalog.json"
+    assert settings.MODEL_PRICING_CACHE_TTL_SECONDS == 3600
 
 
 def test_safe_import_without_env_vars(tmp_path):
@@ -216,5 +226,11 @@ def test_server_backward_compatibility_reexports():
     assert hasattr(server, "STREAM_CHUNK_DELAY_MS")
     assert hasattr(server, "DEBUG_DUMPS")
     assert hasattr(server, "ALLOWED_MODELS")
+    assert hasattr(server, "MODEL_CATALOG_FILE")
+    assert hasattr(server, "MODEL_CATALOG_TTL_SECONDS")
+    assert hasattr(server, "MODEL_PRICING_CACHE_FILE")
+    assert hasattr(server, "MODEL_PRICING_CACHE_TTL_SECONDS")
+    assert hasattr(server, "ModelCatalog")
+    assert hasattr(server, "get_model_catalog")
     assert hasattr(server, "_validate_proxy_api_key")
     assert callable(server._validate_proxy_api_key)

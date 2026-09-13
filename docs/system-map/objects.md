@@ -34,13 +34,23 @@ Responses-API-Payload von OpenAI Codex:
 - **`temperature`**, **`max_output_tokens`** `(optional)`: Generierungsparameter.
 
 ### `GET /v1/models`
-Liefert verfügbare Modelle als OpenAI ModelList:
+Liefert verfügbare Modelle als OpenAI ModelList (direkt aus dem lokalen 24h `ModelCatalog` ohne Upstream-Netzwerklatenz):
 ```json
 {
   "object": "list",
   "data": [
-    { "id": "gpt-4o", "object": "model", "owned_by": "academicai" },
-    { "id": "gpt-4o-mini", "object": "model", "owned_by": "academicai" }
+    {
+      "id": "gpt-5-mini",
+      "object": "model",
+      "created": 0,
+      "owned_by": "academicai",
+      "context_window": 400000,
+      "max_tokens": 128000,
+      "costs": [
+        { "cost": 0.00028, "costType": "input_tokens" },
+        { "cost": 0.0022, "costType": "output_tokens" }
+      ]
+    }
   ]
 }
 ```
@@ -137,8 +147,8 @@ Das Modul [`academicai/config.py`](../../academicai/config.py) ist die zentrale 
 | `COST_CACHE_TTL_SECONDS` | `ACADEMICAI_COST_CACHE_TTL_SECONDS` | `int` | `600` | Gültigkeitsdauer des Cost-Caches in Sekunden |
 | `COST_REFRESH_TIMEOUT_SECONDS` | `ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS` | `float` | `8.0` | Timeout für Live-Refresh der Cost-API |
 | `ENABLE_LOCAL_COST_TRACKING` | `ACADEMICAI_ENABLE_LOCAL_COST_TRACKING` | `bool` | `True` | Schaltet autonome lokale Kostenberechnung & Header aktiv |
-| `MODEL_PRICING_CACHE_FILE` | `ACADEMICAI_MODEL_PRICING_CACHE_FILE` | `str` | `"data/model_pricing_cache.json"` | Pfad zur persistenten JSON-Preistabelle |
-| `MODEL_PRICING_CACHE_TTL_SECONDS` | `ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS` | `int` | `86400` | Gültigkeitsdauer des Modellpreis-Caches in Sekunden (24 Stunden) |
+| `MODEL_CATALOG_FILE` | `ACADEMICAI_MODEL_CATALOG_FILE` | `str` | `"data/model_catalog.json"` | Pfad zum persistenten 24h Modellkatalog & Preistabelle (`MODEL_PRICING_CACHE_FILE` als Alias) |
+| `MODEL_CATALOG_TTL_SECONDS` | `ACADEMICAI_MODEL_CATALOG_TTL_SECONDS` | `int` | `86400` | Gültigkeitsdauer des Modellkatalogs in Sekunden (24h, `MODEL_PRICING_CACHE_TTL_SECONDS` als Alias) |
 | `LOCAL_COST_CACHE_FILE` | `ACADEMICAI_LOCAL_COST_CACHE_FILE` | `str` | `"data/local_cost_cache.json"` | Pfad zur persistenten Aggregationsdatei |
 | `LOCAL_COST_HISTORY_LIMIT` | `ACADEMICAI_LOCAL_COST_HISTORY_LIMIT` | `int` | `500` | Maximale Einträge im Ringpuffer der Request-Historie |
 | `COST_CURRENCY` | `ACADEMICAI_COST_CURRENCY` | `str` | `"EUR"` | Währung für lokale Abrechnung & Response-Header |
@@ -239,14 +249,16 @@ Das Modul [`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py)
 
 Kapselt die vollkommen autonome, anfragegenaue Kostenermittlung ohne Abhängigkeit vom geschützten AcademicAI-Endpunkt `/api/v1/cost/`:
 
-### Modellpreis-Normalisierung & Caching (`ModelPricing`, `ModelPricingCache`)
+### Lokaler 24h Modellkatalog & Preistabelle (`ModelCatalog`, `ModelEntry`, `ModelPricingCache`)
 - **Einheiten-Normalisierung (`parse_model_costs`):**
   - AcademicAI liefert Preise im Feld `costs` pro **1.000 Tokens (1k Tokens)**.
   - Normalisierte Rate pro Einzeltoken: `Decimal(cost) / Decimal(1000)`.
   - Bei gestaffelten Preisen (`costs` mit mehreren `input_tokens`/`output_tokens`-Einträgen) wird die Basisstufe gewählt und `is_tiered = True` gesetzt.
-- **Thread- und Async-sicherer Cache (`ModelPricingCache`):**
-  - Gesteuert über `MODEL_PRICING_CACHE_TTL_SECONDS` (Default: 86400s / 24 Stunden) und `MODEL_PRICING_CACHE_FILE` (Default: `"data/model_pricing_cache.json"`).
-  - **Atomare JSON-Dateipersistenz:** Die Preistabelle wird auf Platte gespeichert und beim Serverstart sofort ohne Latenz geladen.
+  - Parst und serialisiert zudem Modellmetadaten wie `context_window` (`contextWindow`) und `output_token_limit` (`outputTokenLimit`).
+- **Thread- und Async-sicherer Katalog (`ModelCatalog`):**
+  - Gesteuert über `MODEL_CATALOG_TTL_SECONDS` (Default: 86400s / 24 Stunden) und `MODEL_CATALOG_FILE` (Default: `"data/model_catalog.json"`).
+  - **Atomare JSON-Dateipersistenz:** Der Modellkatalog wird auf Platte gespeichert und beim Serverstart sofort ohne Netzwerklatenz geladen. Nahtloser Migrationsfallback liest existierende `data/model_pricing_cache.json`.
+  - **Öffentlicher Endpunkt (`GET /v1/models`):** Liefert direkt aus dem lokalen In-Memory-Katalog im Standard-OpenAI-Format (`to_openai_models_response`) in < 1ms Antwortzeit ohne blockierenden Upstream-Roundtrip.
   - Lazy Background Refresh (`trigger_background_refresh`) ohne Request-Blockade nach Ablauf der 24h-TTL.
   - Fehlertoleranter Fallback: Bleibt bei Ausfall der AcademicAI-Upstream-API transparent auf dem zuletzt gespeicherten Stand.
 

@@ -167,10 +167,34 @@ class AcademicAIProvider:
             ),
         )
 
-    def get_models(self) -> dict:
+    def get_models(self, use_cache: bool = True) -> dict:
         """
         Listet verfügbare Modelle vom AcademicAI-Backend.
+        Nutzt standardmäßig den lokalen 24h ModelCatalog (Cached, 0ms, offline-resilient).
+        Falls use_cache=False oder der Catalog noch leer ist, wird direkt das Backend abgefragt.
         """
+        if use_cache:
+            try:
+                from academicai.cost_calculation import get_model_catalog
+
+                catalog = get_model_catalog()
+                if catalog.is_stale() and not catalog.get_models():
+                    try:
+                        catalog.refresh_sync()
+                    except Exception as e:
+                        log.warning(f"initial model catalog sync refresh failed: {e}")
+                elif catalog.is_stale():
+                    try:
+                        catalog.trigger_background_refresh()
+                    except Exception:
+                        pass
+
+                models_response = catalog.to_openai_models_response()
+                if models_response.get("data"):
+                    return models_response
+            except Exception as e:
+                log.warning(f"failed to serve models from model catalog: {e}")
+
         base_url = get_base_url()
         auth_headers = get_headers()
         endpoint = f"{base_url}/api/v1/llm/models"

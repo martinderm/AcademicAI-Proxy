@@ -118,12 +118,14 @@ Jede erfolgreiche Anfrage über `/v1/chat/completions` (sowohl non-streaming als
 
 *Hinweis:* Standard-OpenAI-Response-Payloads bleiben 100 % unverändert und frei von proprietären Feldern, um die Kompatibilität mit Clients wie Cursor, Codex oder OpenClaw zu garantieren.
 
-### Modellpreis-Tabelle & 24h-Persistenz
+### Lokaler 24h Modellkatalog & Preistabelle (ModelCatalog)
 
-Der Proxy lädt die Modellpreise einmalig vom Endpunkt `/api/v1/llm/models` und persistiert die Preistabelle atomar als JSON-Datei in `data/model_pricing_cache.json` mit einer **Lebensdauer (TTL) von 24 Stunden (86.400 Sekunden)**:
-- **Startup ohne Latenz:** Beim Start des Proxies wird die Preistabelle sofort aus der lokalen JSON-Datei geladen, sodass sofortige LLM-Anfragen ohne Backend-Preisanfrage abgerechnet werden können.
+Der Proxy erfasst alle verfügbaren Modelle und deren Preise einmalig vom Endpunkt `/api/v1/llm/models` und persistiert den Modellkatalog atomar als JSON-Datei in `data/model_catalog.json` mit einer **Lebensdauer (TTL) von 24 Stunden (86.400 Sekunden)**:
+- **Zero-Latency Model Discovery (`GET /v1/models`):** Der Proxy liefert die Modell-Liste direkt aus dem im Speicher gehaltenen Katalog im Standard-OpenAI-Format (`to_openai_models_response()`). Dies eliminiert den 200–500ms langen Upstream-Roundtrip bei jedem Start von Agenten-Tools (OpenCode, Codex, OpenClaw) und bietet vollständige Offline-Resilienz gegen Upstream-Ausfälle.
+- **Metadaten & Tokengrenzen:** Speichert neben Preisen auch `context_window` (z. B. bis zu 1.050.000 Tokens) und `output_token_limit` (`max_tokens`).
+- **Startup ohne Latenz:** Beim Start des Proxies wird der Katalog sofort aus der lokalen JSON-Datei geladen. Sollte `data/model_catalog.json` noch nicht existieren, greift automatisch der Migrations-Fallback auf die bisherige `data/model_pricing_cache.json`.
 - **Background Refresh:** Nach Ablauf der 24 Stunden wird der Refresh asynchron im Hintergrund ausgelöst, ohne den Client-Request zu blockieren.
-- **Fehlertoleranz:** Sollte die AcademicAI-Modell-API temporär nicht erreichbar sein, greift der Proxy transparent auf die zuletzt gespeicherte Preistabelle zurück.
+- **Fehlertoleranz:** Sollte die AcademicAI-Modell-API temporär nicht erreichbar sein, greift der Proxy transparent auf den zuletzt gespeicherten Stand zurück.
 
 ### Lokale Aggregation & Status-Endpunkt (`/internal/cost-status`)
 
@@ -136,7 +138,7 @@ Der Endpunkt `GET /internal/cost-status` liefert:
   - `this_month`: Aggregation für den aktuellen Monat (UTC).
   - `by_model`: Aufschlüsselung pro Modell-ID.
   - `by_client`: Aufschlüsselung nach anonymisiertem Client-Hash (`client_<sha256[:8]>`).
-  - `pricing_cache`: Cache-Status der Modellpreise (`models_cached`, `last_refreshed_at`, `is_stale`, `ttl_seconds`, `cache_file`).
+  - `model_catalog` / `pricing_cache`: Cache-Status des Modellkatalogs (`models_cached`, `last_refreshed_at`, `is_stale`, `ttl_seconds`, `catalog_file`).
   - `recent_requests`: Ringpuffer der letzten 500 Requests (streng datenschutzkonform: nur Metadaten, keine Prompts, Completions oder API-Keys!).
 
 ### Konfigurationsoptionen

@@ -39,12 +39,12 @@ def completion(model: str, messages: list, **kwargs) -> CompletionResponse:
     return _get_provider().completion(model=model, messages=messages, optional_params=kwargs)
 
 
-def get_models() -> dict:
+def get_models(use_cache: bool = True) -> dict:
     """
     Listet verfügbare AcademicAI-Modelle.
     Gibt OpenAI-kompatibles /v1/models Format zurück.
     """
-    return _get_provider().get_models()
+    return _get_provider().get_models(use_cache=use_cache)
 
 
 from .config import Settings, get_settings, validate_config  # noqa: F401
@@ -98,6 +98,21 @@ from .cost_monitoring import (  # noqa: F401
     get_cost_cache_with_lazy_refresh,
     _get_cost_cache_with_lazy_refresh,
     get_cost_status_payload,
+)
+from .cost_calculation import (  # noqa: F401
+    ModelCatalog,
+    ModelEntry,
+    ModelPricing,
+    ModelPricingCache,
+    RequestCost,
+    calculate_request_cost,
+    parse_model_costs,
+    get_model_catalog,
+    get_pricing_cache,
+)
+from .local_cost_tracker import (  # noqa: F401
+    LocalCostStore,
+    get_local_cost_store,
 )
 from .runtime import (  # noqa: F401
     write_pid_file,
@@ -177,6 +192,10 @@ __all__ = [
     "is_human_readable_target", "_is_human_readable_target",
     "last_user_text", "_last_user_text",
     "run_humanization_pass", "_run_humanization_pass",
+    "ModelCatalog", "ModelPricingCache", "ModelEntry", "ModelPricing",
+    "RequestCost", "calculate_request_cost", "parse_model_costs",
+    "get_model_catalog", "get_pricing_cache",
+    "LocalCostStore", "get_local_cost_store",
 ]
 
 

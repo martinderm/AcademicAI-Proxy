@@ -43,7 +43,9 @@ from academicai.config import (
 )
 from academicai.cost_calculation import (
     calculate_request_cost,
+    get_model_catalog,
     get_pricing_cache,
+    ModelCatalog,
     RequestCost,
 )
 from academicai.local_cost_tracker import (
@@ -300,12 +302,17 @@ def cost_status(key: str = Depends(verify_key)):
     store = store_fn()
     local_status = store.get_status_payload()
 
-    # Pricing cache status
-    pricing_cache_fn = _get_setting("_get_pricing_cache") or _get_setting(
-        "get_pricing_cache", get_pricing_cache
+    # Model catalog & pricing cache status
+    catalog_fn = (
+        _get_setting("_get_model_catalog")
+        or _get_setting("get_model_catalog")
+        or _get_setting("_get_pricing_cache")
+        or _get_setting("get_pricing_cache", get_model_catalog)
     )
-    pricing_cache = pricing_cache_fn()
-    local_status["pricing_cache"] = pricing_cache.get_status()
+    catalog = catalog_fn()
+    catalog_status = catalog.get_status()
+    local_status["model_catalog"] = catalog_status
+    local_status["pricing_cache"] = catalog_status
 
     # Merged payload: preserves all root keys for backward compatibility
     # and adds structured sections for both backend monitoring and local tracking.

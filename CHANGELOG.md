@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.1 - 2026-09-13
+
+### 📋 Persistent 24h Model Catalog & Zero-Latency Discovery
+- **Unified Local Model Catalog (`academicai/cost_calculation.py`)**:
+  - Expanded the model pricing cache into a persistent 24h **Local Model Catalog** (`data/model_catalog.json`, `ModelCatalog`), capturing full model metadata (`context_window` / `contextWindow`, `output_token_limit` / `outputTokenLimit`) alongside pricing structures (`costs`).
+  - Single Source of Truth (SSOT) for registered models, token limits, and pricing with automatic migration fallback from legacy `data/model_pricing_cache.json`.
+- **Zero-Latency Model Discovery (`GET /v1/models`)**:
+  - `AcademicAIProvider.get_models()` and `GET /v1/models` now serve directly from the in-memory `ModelCatalog` via `to_openai_models_response()`.
+  - Eliminates the 200–500ms upstream network roundtrip on every client tool startup (OpenCode, Codex, OpenClaw), providing sub-millisecond responses and complete resilience against upstream network outages.
+- **Unified Configuration & Backward Compatibility**:
+  - Configurable via `ACADEMICAI_MODEL_CATALOG_FILE` and `ACADEMICAI_MODEL_CATALOG_TTL_SECONDS` (default: 86400s / 24h), while preserving `ACADEMICAI_MODEL_PRICING_CACHE_*` aliases.
+  - Re-exports across `server.py` and `academicai/__init__.py` (`ModelCatalog`, `ModelEntry`, `get_model_catalog`, `ModelPricingCache`, `get_pricing_cache`).
+  - Extended `/internal/cost-status` to report `model_catalog` status alongside `pricing_cache`.
+- **Comprehensive Unit Tests**:
+  - Extended `tests/test_cost_calculation_unit.py` (23 passing tests) and `tests/test_config.py` verifying catalog serialization, OpenAI response formatting, metadata extraction, and fallback paths.
+
 ## 0.8.0 - 2026-09-13
 
 ### 💰 Robust Autonomous Local Request Cost Calculation

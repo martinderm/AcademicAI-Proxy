@@ -143,6 +143,9 @@ def test_cost_status_handler_delegation(monkeypatch):
     assert payload.get("total_cost") == 15.25
     assert payload.get("total_clients") == 2
     assert payload.get("source") == "cache"
+    assert "local_cost_tracking" in payload
+    assert "model_catalog" in payload["local_cost_tracking"]
+    assert "pricing_cache" in payload["local_cost_tracking"]
 
 
 def test_list_models_handler_success(monkeypatch):
