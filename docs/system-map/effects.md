@@ -35,6 +35,8 @@
 | :--- | :--- | :--- |
 | `server.log` | Jeder HTTP-Request | Tägliche Log-Rotation; automatische Bereinigung von Logs älter als 30 Tage. |
 | `server.pid` | Start / Stop | Speichert die PID des laufenden Uvicorn-Prozesses. |
+| `data/local_cost_cache.json` | Nach jedem LLM-Request | Atomares Schreiben (`tempfile` + `os.replace` mit Windows-Retry) lokaler Kosten-Aggregate und des Request-Ringpuffers. |
+| `data/cost_cache.json` | Polling der AcademicAI Cost-API | Atomares Schreiben des Upstream-Kosten-Snapshots (falls Berechtigung vorhanden). |
 | `last_backend_request.json` | Bei `ACADEMICAI_DEBUG_DUMPS=true` | Überschreibt bei jedem Request den Rohpayload zum Debugging. |
 
 ---
@@ -47,9 +49,11 @@
    Wenn `ACADEMICAI_PROXY_API_KEY` fehlt, kürzer als 16 Zeichen ist oder bekannte Standardwerte (`changeme`, `replace-with-strong-key`) enthält, verweigert der Server den Start mit Exit-Code 1.
 3. **Request- & Payload-Limits (413 / 422 Guardrails):**  
    Schützt Proxy und Backend vor Memory Exhaustion und unkontrollierten Payloads:
-   - Tool-Obergrenze: `ACADEMICAI_MAX_TOOLS` (Default: 256)
+   - Tool-Obergrenze: `ACADEMICAI_MAX_TOOLS` (Default: 64)
    - Tool-Schema-Größe: `ACADEMICAI_MAX_TOOL_SCHEMA_CHARS` (Default: 100.000 Chars)
-   - Message-Textlänge: `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` (Default: 200.000 Chars, in `.env` für 1M-Context-Modelle bis 1.000.000)
-   - Gesamt-JSON-Payload: `ACADEMICAI_MAX_REQUEST_JSON_CHARS` (Default: 2.000.000 Chars, konfigurierbar bis 10.000.000)
-   - Nachrichtenanzahl: `ACADEMICAI_MAX_MESSAGES` (Default: 300)
+   - Message-Textlänge: `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` (Default: 500.000 Chars)
+   - Gesamt-JSON-Payload: `ACADEMICAI_MAX_REQUEST_JSON_CHARS` (Default: 2.000.000 Chars)
+   - Nachrichtenanzahl: `ACADEMICAI_MAX_MESSAGES` (Default: 200)
    - Bei Überschreitung wird der Request mit `413 Content Too Large` abgewiesen und mit exakten Zählwerten in `server.log` protokolliert.
+4. **Datenschutz & Anonymisierung bei lokaler Kostenberechnung:**  
+   Die Request-Historie (`recent_requests`) speichert ausschließlich Zählwerte, Timestamps, Modell-IDs und berechnete Kosten. Prompts, Completions, Tool-Argumente und rohe API-Keys werden unter keinen Umständen persistiert. Client-Schlüssel werden als unumkehrbare SHA-256 Hashes (`client_<hash[:8]>`) anonymisiert.

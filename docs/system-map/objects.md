@@ -132,10 +132,16 @@ Das Modul [`academicai/config.py`](../../academicai/config.py) ist die zentrale 
 | `CLIENT_SECRET` | `ACADEMICAI_CLIENT_SECRET` | `str (Secret)` | `""` | AcademicAI Backend API Client Secret |
 | `HEALTH_CHECK_BACKEND` | `ACADEMICAI_HEALTH_CHECK_BACKEND` | `bool` | `True` | Aktiviert Backend-Connectivity-Check in `/health` |
 | `HEALTH_CHECK_TIMEOUT_SECONDS` | `ACADEMICAI_HEALTH_CHECK_TIMEOUT_SECONDS` | `float` | `2.0` | Timeout für Backend-Health-Check |
-| `ENABLE_COST_MONITORING` | `ACADEMICAI_ENABLE_COST_MONITORING` | `bool` | `True` | Schaltet Cost-Header & Monitoring aktiv |
+| `ENABLE_COST_MONITORING` | `ACADEMICAI_ENABLE_COST_MONITORING` | `bool` | `True` | Schaltet Backend Cost-Header & Monitoring aktiv |
 | `COST_CACHE_FILE` | `ACADEMICAI_COST_CACHE_FILE` | `str` | `"data/cost_cache.json"` | Pfad zur lokalen Cost-Cache-Datei |
 | `COST_CACHE_TTL_SECONDS` | `ACADEMICAI_COST_CACHE_TTL_SECONDS` | `int` | `600` | Gültigkeitsdauer des Cost-Caches in Sekunden |
 | `COST_REFRESH_TIMEOUT_SECONDS` | `ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS` | `float` | `8.0` | Timeout für Live-Refresh der Cost-API |
+| `ENABLE_LOCAL_COST_TRACKING` | `ACADEMICAI_ENABLE_LOCAL_COST_TRACKING` | `bool` | `True` | Schaltet autonome lokale Kostenberechnung & Header aktiv |
+| `MODEL_PRICING_CACHE_FILE` | `ACADEMICAI_MODEL_PRICING_CACHE_FILE` | `str` | `"data/model_pricing_cache.json"` | Pfad zur persistenten JSON-Preistabelle |
+| `MODEL_PRICING_CACHE_TTL_SECONDS` | `ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS` | `int` | `86400` | Gültigkeitsdauer des Modellpreis-Caches in Sekunden (24 Stunden) |
+| `LOCAL_COST_CACHE_FILE` | `ACADEMICAI_LOCAL_COST_CACHE_FILE` | `str` | `"data/local_cost_cache.json"` | Pfad zur persistenten Aggregationsdatei |
+| `LOCAL_COST_HISTORY_LIMIT` | `ACADEMICAI_LOCAL_COST_HISTORY_LIMIT` | `int` | `500` | Maximale Einträge im Ringpuffer der Request-Historie |
+| `COST_CURRENCY` | `ACADEMICAI_COST_CURRENCY` | `str` | `"EUR"` | Währung für lokale Abrechnung & Response-Header |
 | `MAX_MESSAGES` | `ACADEMICAI_MAX_MESSAGES` | `int` | `200` | Maximal zulässige Anzahl an Chat-Nachrichten pro Request (Schutzgrenze 413) |
 | `MAX_TOOLS` | `ACADEMICAI_MAX_TOOLS` | `int` | `64` | Maximal übermittelte Tool-Definitionen (Schutzgrenze 413) |
 | `MAX_MESSAGE_TEXT_CHARS` | `ACADEMICAI_MAX_MESSAGE_TEXT_CHARS` | `int` | `500000` | Max. Zeichenlänge pro Einzelnachricht (Text/Prompt-Payload; Schutzgrenze 413) |
@@ -229,7 +235,52 @@ Das Modul [`academicai/cost_monitoring.py`](../../academicai/cost_monitoring.py)
 
 ---
 
-## 7. Runtime-Lifecycle & Health-Zustand ([`academicai/runtime.py`](../../academicai/runtime.py))
+## 7. Lokale Kostenberechnung & Persistenter Aggregator ([`academicai/cost_calculation.py`](../../academicai/cost_calculation.py), [`academicai/local_cost_tracker.py`](../../academicai/local_cost_tracker.py))
+
+Kapselt die vollkommen autonome, anfragegenaue Kostenermittlung ohne Abhängigkeit vom geschützten AcademicAI-Endpunkt `/api/v1/cost/`:
+
+### Modellpreis-Normalisierung & Caching (`ModelPricing`, `ModelPricingCache`)
+- **Einheiten-Normalisierung (`parse_model_costs`):**
+  - AcademicAI liefert Preise im Feld `costs` pro **1.000 Tokens (1k Tokens)**.
+  - Normalisierte Rate pro Einzeltoken: `Decimal(cost) / Decimal(1000)`.
+  - Bei gestaffelten Preisen (`costs` mit mehreren `input_tokens`/`output_tokens`-Einträgen) wird die Basisstufe gewählt und `is_tiered = True` gesetzt.
+- **Thread- und Async-sicherer Cache (`ModelPricingCache`):**
+  - Gesteuert über `MODEL_PRICING_CACHE_TTL_SECONDS` (Default: 86400s / 24 Stunden) und `MODEL_PRICING_CACHE_FILE` (Default: `"data/model_pricing_cache.json"`).
+  - **Atomare JSON-Dateipersistenz:** Die Preistabelle wird auf Platte gespeichert und beim Serverstart sofort ohne Latenz geladen.
+  - Lazy Background Refresh (`trigger_background_refresh`) ohne Request-Blockade nach Ablauf der 24h-TTL.
+  - Fehlertoleranter Fallback: Bleibt bei Ausfall der AcademicAI-Upstream-API transparent auf dem zuletzt gespeicherten Stand.
+
+### Hochpräzise Request-Kostenberechnung (`RequestCost`, `calculate_request_cost`)
+- **Decimal-Arithmetik:**
+  - Berechnet `input_cost`, `output_cost`, `per_request_cost` und `request_cost` mit Pythons `Decimal`, um Fließkomma-Drift bei Mikro-Beträgen zu eliminieren.
+- **Standardisierte Response-Header (`to_headers`):**
+  - `X-AcademicAI-Request-Cost`: Formatierter Betrag (z.B. `"0.000825"`).
+  - `X-AcademicAI-Input-Cost`: Berechnete Prompt-Token-Kosten.
+  - `X-AcademicAI-Output-Cost`: Berechnete Completion-Token-Kosten.
+  - `X-AcademicAI-Prompt-Tokens`: Tatsächliche Prompt-Tokens.
+  - `X-AcademicAI-Completion-Tokens`: Tatsächliche Completion-Tokens.
+  - `X-AcademicAI-Cost-Currency`: Währung (`"EUR"`).
+  - `X-AcademicAI-Cost-Estimated`: `"true"` bei gestaffelten oder fehlenden Modellpreisen, sonst `"false"`.
+
+### Persistenter lokaler Aggregator (`LocalCostStore`, `CostAggregationBucket`)
+- **Genau-einmal-Abrechnung (`record_request`):**
+  - Bucht Tokens und Kosten für non-streaming und streaming Anfragen exakt einmal.
+- **Aggregationsdimensionen:**
+  - `all_time`: Gesamtsummen seit Aufzeichnung.
+  - `today`: Aufgeschlüsselt nach aktuellem UTC-Tag (`YYYY-MM-DD`).
+  - `this_month`: Aufgeschlüsselt nach aktuellem UTC-Monat (`YYYY-MM`).
+  - `by_model`: Aufgeschlüsselt nach Modell-Identifikator.
+  - `by_client`: Aufgeschlüsselt nach anonymisiertem SHA-256 Client-Hash (`client_<hash[:8]>`).
+- **Datenschutzkonformer Ringpuffer (`recent_requests`):**
+  - Fester Puffer der letzten `LOCAL_COST_HISTORY_LIMIT` Anfragen (Default: 500).
+  - Enthält **ausschließlich** Abrechnungs-Metadaten (`timestamp`, `model`, `client_id`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `request_cost`, `currency`, `is_estimated`).
+  - **Streng verboten und technisch ausgeschlossen:** Keine Speicherung von Prompts, Completions, Tools oder Roh-API-Keys.
+- **Atomare Dateipersistenz:**
+  - Atomares Schreiben nach `LOCAL_COST_CACHE_FILE` (Default: `data/local_cost_cache.json`) via temporäre Datei, `os.fsync` und `os.replace` mit Windows-Sharing-Retry-Logik.
+
+---
+
+## 8. Runtime-Lifecycle & Health-Zustand ([`academicai/runtime.py`](../../academicai/runtime.py))
 
 Das Modul [`academicai/runtime.py`](../../academicai/runtime.py) kapselt Lifecycle-Helfer für das Prozess- und Daemon-Management sowie die Zustandsermittlung des Proxies und dessen Upstream-Anbindung:
 
@@ -268,7 +319,7 @@ Das Modul [`academicai/runtime.py`](../../academicai/runtime.py) kapselt Lifecyc
 
 ---
 
-## 8. Logging-Infrastruktur & Handler-State ([`academicai/logging_config.py`](../../academicai/logging_config.py))
+## 9. Logging-Infrastruktur & Handler-State ([`academicai/logging_config.py`](../../academicai/logging_config.py))
 
 Das Modul [`academicai/logging_config.py`](../../academicai/logging_config.py) kapselt die Initialisierung, Rotation und Entkopplung des Logging-Subsystems:
 
@@ -303,7 +354,7 @@ Das Modul [`academicai/logging_config.py`](../../academicai/logging_config.py) k
 
 ---
 
-## 9. Humanization & Zielkanal-Klassifizierung ([`academicai/humanization.py`](../../academicai/humanization.py))
+## 10. Humanization & Zielkanal-Klassifizierung ([`academicai/humanization.py`](../../academicai/humanization.py))
 
 Das Modul [`academicai/humanization.py`](../../academicai/humanization.py) kapselt Heuristiken zur Unterscheidung menschlicher Chat-Kanäle von maschinellen API-Aufrufen, die Extraktion des letzten User-Prompts, die Konstruktion von Prompts für den zweiten LLM-Pass und die asynchrone Ausführung des Humanisierungs-Passes:
 
@@ -338,7 +389,7 @@ Das Modul [`academicai/humanization.py`](../../academicai/humanization.py) kapse
 
 ---
 
-## 10. Application Factory & Modern Lifespan ([`academicai/app.py`](../../academicai/app.py))
+## 11. Application Factory & Modern Lifespan ([`academicai/app.py`](../../academicai/app.py))
 
 Das Modul [`academicai/app.py`](../../academicai/app.py) kapselt die FastAPI-Anwendungsinstanziierung, den modernen ASGI-Lifespan-Handler sowie das zentrale Routing aller öffentlichen und internen HTTP-Endpunkte:
 
@@ -367,7 +418,7 @@ Das Modul [`academicai/app.py`](../../academicai/app.py) kapselt die FastAPI-Anw
 
 ---
 
-## 11. CLI-Entrypoint & Kompatibilitätsschicht ([`server.py`](../../server.py))
+## 12. CLI-Entrypoint & Kompatibilitätsschicht ([`server.py`](../../server.py))
 
 Das Root-Skript [`server.py`](../../server.py) wurde im Zuge des Refactorings zu einem reinen, schlanken Einstiegspunkt und Kompatibilitäts-Layer kontrahiert (< 200 Zeilen):
 
@@ -383,7 +434,7 @@ Das Root-Skript [`server.py`](../../server.py) wurde im Zuge des Refactorings zu
 
 ---
 
-## 12. OpenAI Responses API & Codex Wire Protocol ([`academicai/responses.py`](../../academicai/responses.py))
+## 13. OpenAI Responses API & Codex Wire Protocol ([`academicai/responses.py`](../../academicai/responses.py))
 
 Das Modul [`academicai/responses.py`](../../academicai/responses.py) kapselt die Request-Normalisierung, SSE-Wire-Event-Generierung und Token-Usage-Berechnung für die OpenAI Responses API (insbesondere für OpenAI Codex CLI und Desktop):
 
@@ -425,4 +476,21 @@ Das Modul [`academicai/responses.py`](../../academicai/responses.py) kapselt die
   - `output_tokens` $\leftrightarrow$ `completion_tokens`
   - `total_tokens`
 - Liefert alle 5 Schlüssel aus, wodurch sowohl die Codex CLI als auch Standard-OpenAI-Clients fehlerfrei deserialisieren können.
+
+---
+
+## 14. Modell-Konnektivitäts- & Diagnose-CLI ([`test_models_connectivity.py`](../../test_models_connectivity.py))
+
+Das Root-Skript [`test_models_connectivity.py`](../../test_models_connectivity.py) dient als primäres Werkzeug zur Diagnose von Netzwerkverbindungen, Modellverfügbarkeit und Upstream-Fehlern:
+
+- **Dual-Mode-Architektur:**
+  - **Local-Proxy-Modus (Default):** Testet den lokal laufenden Proxy auf Port 11435 (`/v1/models` und `/v1/chat/completions`) über non-streaming und SSE-Streaming.
+  - **Upstream-Direktmodus (`--upstream` / `-u`):** Testet unter Umgehung des lokalen Proxies direkt gegen das AcademicAI-Backend (`/api/v1/llm/models` und `/api/v1/llm/chat`). Ermöglicht sofortige Isolation zwischen lokalen Proxy-Problemen und Upstream-Fehlern (z.B. abgelaufene Credentials, Cost Limits).
+- **Strukturierte Fehler-Extraktion (`_extract_error_message`):**
+  - Erkennt sowohl OpenAI-kompatible Fehler (`{"error": {"message": ...}}`) als auch tief geschachtelte AcademicAI-Fehler (`{"meta": {"error": {"message": ...}}}`).
+  - Verhindert das irreführende Maskieren von Kontingentfehlern als `"Backend 500"`; zeigt stattdessen z.B. `[FAIL] HTTP 429: AcademicAI Cost Limit Reached: API Client Error: Cost limit reached`.
+- **Modell-Listing (`--list` / `-l`):**
+  - Zeigt alle verfügbaren Modelle tabellarisch mit Kontextgröße, maximalem Token-Limit und normalisierten Preisen in `€/1M` an, ohne Test-Prompts abzufeuern.
+- **Selektives Filtern (`--model <name>` / `-m <name>`):**
+  - Ermöglicht gezieltes Testen einzelner Modelle oder Modell-Familien (z.B. `-m gpt-5-mini` oder `-m claude`).
 

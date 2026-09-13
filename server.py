@@ -106,6 +106,12 @@ from academicai.config import (
     COST_CACHE_FILE,
     COST_CACHE_TTL_SECONDS,
     COST_REFRESH_TIMEOUT_SECONDS,
+    ENABLE_LOCAL_COST_TRACKING,
+    MODEL_PRICING_CACHE_TTL_SECONDS,
+    MODEL_PRICING_CACHE_FILE,
+    LOCAL_COST_CACHE_FILE,
+    LOCAL_COST_HISTORY_LIMIT,
+    COST_CURRENCY,
     MAX_MESSAGES,
     MAX_TOOLS,
     MAX_MESSAGE_TEXT_CHARS,
@@ -156,6 +162,25 @@ from academicai.cost_monitoring import (
     get_cost_cache_with_lazy_refresh,
     get_cost_status_payload,
 )
+
+from academicai.cost_calculation import (
+    calculate_request_cost,
+    get_pricing_cache,
+    ModelPricingCache,
+    ModelPricing,
+    RequestCost,
+    parse_model_costs,
+)
+_calculate_request_cost = calculate_request_cost
+_get_pricing_cache = get_pricing_cache
+
+from academicai.local_cost_tracker import (
+    get_local_cost_store,
+    LocalCostStore,
+    CostAggregationBucket,
+    hash_client_key,
+)
+_get_local_cost_store = get_local_cost_store
 
 from academicai.runtime import (
     write_pid_file,

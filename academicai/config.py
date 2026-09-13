@@ -115,6 +115,14 @@ class Settings:
     COST_CACHE_TTL_SECONDS: int = 600
     COST_REFRESH_TIMEOUT_SECONDS: float = 8.0
 
+    # Local Request Cost Tracking
+    ENABLE_LOCAL_COST_TRACKING: bool = True
+    MODEL_PRICING_CACHE_TTL_SECONDS: int = 86400
+    MODEL_PRICING_CACHE_FILE: str = "data/model_pricing_cache.json"
+    LOCAL_COST_CACHE_FILE: str = "data/local_cost_cache.json"
+    LOCAL_COST_HISTORY_LIMIT: int = 500
+    COST_CURRENCY: str = "EUR"
+
     # Payload & Request Limits
     MAX_MESSAGES: int = 200
     MAX_TOOLS: int = 64
@@ -159,6 +167,8 @@ class Settings:
         e = os.environ if env is None else env
 
         cost_cache_default = str(Path("data") / "cost_cache.json")
+        model_pricing_cache_default = str(Path("data") / "model_pricing_cache.json")
+        local_cost_cache_default = str(Path("data") / "local_cost_cache.json")
         pid_default = Path("server.pid")
 
         return cls(
@@ -174,6 +184,13 @@ class Settings:
             COST_CACHE_FILE=str(e.get("ACADEMICAI_COST_CACHE_FILE", cost_cache_default)),
             COST_CACHE_TTL_SECONDS=_parse_int(e.get("ACADEMICAI_COST_CACHE_TTL_SECONDS"), 600, min_val=60),
             COST_REFRESH_TIMEOUT_SECONDS=_parse_float(e.get("ACADEMICAI_COST_REFRESH_TIMEOUT_SECONDS"), 8.0, min_val=1.0),
+
+            ENABLE_LOCAL_COST_TRACKING=_parse_bool(e.get("ACADEMICAI_ENABLE_LOCAL_COST_TRACKING"), True),
+            MODEL_PRICING_CACHE_TTL_SECONDS=_parse_int(e.get("ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS"), 86400, min_val=30),
+            MODEL_PRICING_CACHE_FILE=str(e.get("ACADEMICAI_MODEL_PRICING_CACHE_FILE", model_pricing_cache_default)),
+            LOCAL_COST_CACHE_FILE=str(e.get("ACADEMICAI_LOCAL_COST_CACHE_FILE", local_cost_cache_default)),
+            LOCAL_COST_HISTORY_LIMIT=_parse_int(e.get("ACADEMICAI_LOCAL_COST_HISTORY_LIMIT"), 500, min_val=10),
+            COST_CURRENCY=str(e.get("ACADEMICAI_COST_CURRENCY", "EUR")).strip() or "EUR",
 
             MAX_MESSAGES=_parse_int(e.get("ACADEMICAI_MAX_MESSAGES"), 200, min_val=1),
             MAX_TOOLS=_parse_int(e.get("ACADEMICAI_MAX_TOOLS"), 64, min_val=0),
@@ -267,6 +284,13 @@ COST_CACHE_FILE = _default_settings.COST_CACHE_FILE
 COST_CACHE_TTL_SECONDS = _default_settings.COST_CACHE_TTL_SECONDS
 COST_REFRESH_TIMEOUT_SECONDS = _default_settings.COST_REFRESH_TIMEOUT_SECONDS
 
+ENABLE_LOCAL_COST_TRACKING = _default_settings.ENABLE_LOCAL_COST_TRACKING
+MODEL_PRICING_CACHE_TTL_SECONDS = _default_settings.MODEL_PRICING_CACHE_TTL_SECONDS
+MODEL_PRICING_CACHE_FILE = _default_settings.MODEL_PRICING_CACHE_FILE
+LOCAL_COST_CACHE_FILE = _default_settings.LOCAL_COST_CACHE_FILE
+LOCAL_COST_HISTORY_LIMIT = _default_settings.LOCAL_COST_HISTORY_LIMIT
+COST_CURRENCY = _default_settings.COST_CURRENCY
+
 MAX_MESSAGES = _default_settings.MAX_MESSAGES
 MAX_TOOLS = _default_settings.MAX_TOOLS
 MAX_MESSAGE_TEXT_CHARS = _default_settings.MAX_MESSAGE_TEXT_CHARS
@@ -327,6 +351,11 @@ __all__ = [
     "COST_CACHE_FILE",
     "COST_CACHE_TTL_SECONDS",
     "COST_REFRESH_TIMEOUT_SECONDS",
+    "ENABLE_LOCAL_COST_TRACKING",
+    "MODEL_PRICING_CACHE_TTL_SECONDS",
+    "MODEL_PRICING_CACHE_FILE",
+    "LOCAL_COST_CACHE_FILE",
+    "LOCAL_COST_HISTORY_LIMIT",
     "MAX_MESSAGES",
     "MAX_TOOLS",
     "MAX_MESSAGE_TEXT_CHARS",

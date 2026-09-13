@@ -80,9 +80,12 @@ Jeder Chat-Completion-Request durchläuft eine 8-Stufen-Pipeline in [`academicai
     └─ Optionaler 2. LLM-Pass (run_humanization_pass / build_humanization_messages) bei ENABLE_HUMANIZATION_PASS auf Human-Kanälen
        │
        ▼
- 8. Response-Formatierung:
-    ├─ Streaming: SSE-Chunk-Generator (build_tool_calls_sse_chunks)
-    └─ Non-Streaming: JSON Response (build_tool_calls_response)
+ 8. Response-Formatierung & Lokale Kostenabrechnung:
+    ├─ Lokale Kostenberechnung (academicai/cost_calculation.py: calculate_request_cost via Decimal)
+    ├─ Genau-einmal-Buchung & Aggregation (academicai/local_cost_tracker.py: record_request)
+    ├─ Injektion standardisierter X-AcademicAI-*-Cost Header
+    ├─ Streaming: SSE-Chunk-Generator (build_tool_calls_sse_chunks oder build_responses_sse_events)
+    └─ Non-Streaming: JSON Response (build_tool_calls_response oder build_responses_output)
        │
        ▼
 [Outbound Client Response]
@@ -221,6 +224,9 @@ Die Test-Suiten decken die sensiblen Transformations- und Sicherheitsheuristiken
 | `test_config.py` | Validiert Standardwerte, Env-Override, sicheren Import ohne fatalen Crash, Insecure-Key-Validierung und Rückwärtskompatibilität. |
 | `test_request_guards.py` | Validiert Inbound-Payloads (422/413), JSON-Größenlimits, Token-Bucket Rate-Limiting (429), Bucket-Sweep / TTL-Cleanup gegen unbegrenztes Speicherwachstum sowie Server-Re-Exports. |
 | `test_cost_monitoring_unit.py` | Unit-Tests für akademische Kostenüberwachung: Parsing (`_safe_float`, `_parse_iso_ts`), Payload-Extraktion (`_extract_cost_summary`), Stale-Prüfung (`is_cost_cache_stale`), Header-Generierung (`build_cost_headers`), atomare Cache-Roundtrips, Thread-Sicherheit und Server-Re-Exports. |
+| `test_cost_calculation_unit.py` | Unit-Tests für Modellpreis-Cache (`ModelPricingCache`) und hochpräzise `Decimal`-Kostenberechnung (`calculate_request_cost`): 1k-Token-Normalisierung, 24h-TTL, atomare JSON-Dateipersistenz, per-request-Kosten, Tiered-Model-Erkennung, Token-Grenzwerte und Header-Formatierung. |
+| `test_local_cost_tracker_unit.py` | Unit-Tests für persistenten lokalen Kosten-Speicher (`LocalCostStore`): Exakt-einmal-Abrechnung, Aggregationen (`all_time`, `today`, `this_month`, `by_model`, `by_client`), Ringpuffer-Grenzwerte (500), Datenschutz-Sanitization (keine Prompts/Keys), atomare Dateipersistenz und Thread-Sicherheit. |
+| `test_cost_headers.py` | Integrationstests für Kosten-Header: Überprüfung aller `X-AcademicAI-*-Cost`-Header in Chat Completions, SSE-Streaming, Responses API und Deaktivierungs-Toggle (`ENABLE_LOCAL_COST_TRACKING=False`). |
 | `test_runtime_unit.py` | Unit-Tests für Laufzeit-Lifecycle: PID-File-Erstellung und -Bereinigung mit PID-Matching, Backend-Health-Checks (Erfolg, Timeout, Fehler, Deaktivierung), Health-Payload-Generierung (`ok`/`degraded`) und Server-Re-Exports. |
 | `test_logging_config_unit.py` | Unit-Tests für Logging-Konfiguration: Formatter, rotierende File-Handler (Info & Error), Konsolen-Handler, Uvicorn-Logger-Wiring (propagate=False), dynamische Pfadauflösung, Windows-kompatibles Schließen via close_handlers und Server-Re-Exports. |
 | `test_app_unit.py` | Unit-Tests für Application Factory (`create_app`), modernen ASGI-Lifespan (Startup/Shutdown Hooks, Starlette TestClient), Routing-Delegation (`/health`, `/internal/cost-status`, `/v1/models`, `/v1/chat/completions`), Fehlerbehandlung (502) sowie `apply_post_tool_guard` und Server-Re-Exports. |

@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.8.0 - 2026-09-13
+
+### 💰 Robust Autonomous Local Request Cost Calculation
+- **Autonomous Request-Level Cost Accounting**: Combines model pricing metadata from `/api/v1/llm/models` with actual response token usage (`prompt_tokens`, `completion_tokens`, `total_tokens`), completely eliminating dependence on the restricted `/api/v1/cost/` backend endpoint (`ACCESS_API_MONITOR_CREDIT` 403 Forbidden).
+- **Dynamic Model Pricing Cache (`academicai/cost_calculation.py`)**:
+  - Thread- and async-safe caching of `/api/v1/llm/models` pricing with configurable 24-hour TTL (default 86400s, `ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS`).
+  - Atomic JSON disk persistence (`data/model_pricing_cache.json`) for zero-latency startup and offline/upstream outage fallback.
+  - Empirical 1k-token pricing normalization: converts AcademicAI's per-1,000-token costs into per-token rates (`Decimal(cost) / 1000`).
+  - High-precision `Decimal` arithmetic throughout to prevent floating-point drift on micro-cents.
+  - Standardized default currency: `EUR` (configurable via `ACADEMICAI_COST_CURRENCY`).
+  - **Currency SSOT Harmonization**: Top-level `currency: "EUR"` stored once as Single Source of Truth in `data/model_pricing_cache.json` with dynamic delegation from `ModelPricing`, eliminating redundant per-model repetitions.
+  - Graceful degradation: cached fallback on network issues; fallback to base tier with `is_estimated = True` for tiered context models.
+- **Diagnostic CLI Upgrade (`test_models_connectivity.py`)**:
+  - Dual-mode architecture: test local running proxy (default) or bypass proxy to test directly against AcademicAI upstream (`--upstream` / `-u`).
+  - Precise error formatting: extracts OpenAI-style `error.message` and upstream BOKU `meta.error.message` (e.g. `Cost limit reached`), preventing quota errors from being masked as generic `Backend 500`.
+  - Model listing (`--list` / `-l`): tabular inspection of context window, output token limits, and normalized prices in `€/1M` without firing test completions.
+  - Selective filtering (`--model <name>` / `-m <name>`): targeted testing of specific models or families.
+- **Standardized Response Headers**:
+  - Injected on both non-streaming and streaming completions (`/v1/chat/completions` and `/v1/responses`):
+    - `X-AcademicAI-Request-Cost`
+    - `X-AcademicAI-Input-Cost`
+    - `X-AcademicAI-Output-Cost`
+    - `X-AcademicAI-Prompt-Tokens`
+    - `X-AcademicAI-Completion-Tokens`
+    - `X-AcademicAI-Cost-Currency` (EUR)
+    - `X-AcademicAI-Cost-Estimated`
+  - Zero disruption to standard OpenAI payloads (no proprietary JSON fields injected).
+- **Local Persistent Aggregator & Ring Buffer (`academicai/local_cost_tracker.py`)**:
+  - Exactly-once request booking for non-streaming and streaming responses.
+  - Aggregations across `all_time`, `today` (UTC YYYY-MM-DD), `this_month` (UTC YYYY-MM), `by_model`, and `by_client` (anonymized hash `client_<sha256[:8]>`).
+  - Ring buffer of the last 500 requests (`ACADEMICAI_LOCAL_COST_HISTORY_LIMIT`) storing strictly accounting metadata (guaranteed: NO prompts, completions, tools, or API keys).
+  - Atomic JSON persistence via `tempfile` + `os.replace` with Windows retry logic (`data/local_cost_cache.json`).
+- **Extended Status Endpoint (`GET /internal/cost-status`)**:
+  - Preserves 100% backward-compatible root fields for existing monitoring scripts.
+  - Exposes `backend_cost_monitoring` snapshot and comprehensive `local_cost_tracking` details with aggregations, pricing cache health, and recent request history.
+- **Comprehensive Unit & Integration Test Suite**:
+  - Added `tests/test_cost_calculation_unit.py` (17 tests) and `tests/test_local_cost_tracker_unit.py` (7 tests).
+  - Expanded `tests/test_cost_headers.py` and `tests/test_characterization_endpoints.py` with local cost verification.
+  - Total test suite expanded to 233 passing tests.
+
 ## 0.7.1 - 2026-09-12
 
 ### ⚙️ Multi-Model Compatibility & Token Limit Auto-Stripping

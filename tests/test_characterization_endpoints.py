@@ -86,6 +86,10 @@ def test_cost_status_authenticated_returns_expected_structure(client, monkeypatc
     assert data["updated_at"] == "2026-09-06T12:00:00+00:00"
     assert "is_stale" in data
     assert data["source"] == "cache"
+    assert "backend_cost_monitoring" in data
+    assert "local_cost_tracking" in data
+    assert "all_time" in data["local_cost_tracking"]
+    assert "pricing_cache" in data["local_cost_tracking"]
 
 
 # ---------------------------------------------------------------------------

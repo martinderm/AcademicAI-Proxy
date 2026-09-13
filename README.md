@@ -10,6 +10,7 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 - Model list endpoint: ✅
 - Health endpoint: ✅
 - Cost status endpoint: ✅
+- Local Request Cost Calculation: ✅ (Autonomous Decimal cost accounting, pricing cache & aggregation)
 - Tool-call emulation (JSON-mode with TypeScript signatures & JSON repair): ✅
 - SSE-style streaming emulation: ✅
 - Daily Log Rotation (30 days retention): ✅
@@ -21,7 +22,8 @@ It exposes AcademicAI models on a local OpenAI-style API (default: `http://127.0
 ### Caching and Costs Status
 
 - **Automatic Prefix Caching**: ✅ Supported natively. The proxy is aligned to merge system instructions at the very beginning of the first user message, maximizing Azure OpenAI prefix cache hit rates.
-- **Cost/usage monitoring**: 🔴 (Disabled / Forbidden on the AcademicAI backend credentials - endpoint returns `403 Forbidden` due to tenant permissions).
+- **Autonomous Local Cost Calculation**: ✅ Fully operational. The proxy dynamically caches model pricing from `/api/v1/llm/models`, calculates exact request costs via `Decimal` arithmetic, injects standardized response headers, and maintains persistent local aggregations (`today`, `this_month`, `all_time`, `by_model`, `by_client`).
+- **AcademicAI Backend Cost Endpoint (`/api/v1/cost/`)**: 🔴 (Returns `403 Forbidden` due to tenant permissions `ACCESS_API_MONITOR_CREDIT`). Local tracking completely bypasses this limitation.
 
 ## Why this proxy exists
 
@@ -84,6 +86,72 @@ The proxy dynamically discovers and validates available models from the Academic
 | **Google** | `gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` | 1M token context window, multimodal capabilities |
 | **Perplexity** | `sonar-pro`, `sonar-reasoning-pro` | Built-in search and citations |
 | **Mistral** | `Mistral-Large-3` | 256k context window |
+
+
+## Lokale Kostenberechnung (Local Cost Calculation)
+
+Da der AcademicAI-Endpunkt `/api/v1/cost/` für Standard-API-Clients `403 Forbidden` (`ACCESS_API_MONITOR_CREDIT`) zurückgibt, führt der Proxy eine autonome lokale Kostenberechnung pro Request durch.
+
+### Preismechanik & Einheiten
+
+AcademicAI liefert über den Endpunkt `/api/v1/llm/models` die Kosteninformationen pro Modell in der Datenstruktur `costs`.
+- **Maßeinheit & Währung:** Preise in `costs` (für `input_tokens` und `output_tokens`) sind in **EUR pro 1.000 Tokens (1k Tokens)** angegeben (z. B. `0.00275` für `gpt-4o` Input = 0,00275 € / 1k Tokens).
+- **Berechnungsformel:**
+  $$\text{input\_rate} = \frac{\text{cost}}{1000}, \quad \text{output\_rate} = \frac{\text{cost}}{1000}$$
+  $$\text{request\_cost} = (\text{prompt\_tokens} \times \text{input\_rate}) + (\text{completion\_tokens} \times \text{output\_rate}) + \text{per\_request\_cost}$$
+- **Hochpräzise Arithmetik:** Sämtliche Berechnungen erfolgen mit Pythons `Decimal`-Modul, um Rundungsfehler bei Mikro-Cents vollständig zu vermeiden.
+- **Kontext-Staffelung (Tiered Models):** Modelle mit mehreren Preisstufen (`gpt-5.5`, `gemini-2.5-pro`) nutzen die Basisstufe als Standard und markieren die Berechnung mit `X-AcademicAI-Cost-Estimated: true`.
+
+### Response-Headers
+
+Jede erfolgreiche Anfrage über `/v1/chat/completions` (sowohl non-streaming als auch streaming) sowie über `/v1/responses` liefert standardisierte Kosten- und Token-Header zurück:
+
+| Header | Beschreibung | Beispiel |
+| :--- | :--- | :--- |
+| `X-AcademicAI-Request-Cost` | Gesamtkosten des Requests | `0.000825` |
+| `X-AcademicAI-Input-Cost` | Berechnete Input-Token-Kosten | `0.00033` |
+| `X-AcademicAI-Output-Cost` | Berechnete Output-Token-Kosten | `0.000495` |
+| `X-AcademicAI-Prompt-Tokens` | Tatsächliche Prompt-Tokens | `120` |
+| `X-AcademicAI-Completion-Tokens` | Tatsächliche Completion-Tokens | `45` |
+| `X-AcademicAI-Cost-Currency` | Währung (Standard: EUR) | `EUR` |
+| `X-AcademicAI-Cost-Estimated` | `true`, falls Modellpreise geschätzt/gestaffelt | `false` |
+
+*Hinweis:* Standard-OpenAI-Response-Payloads bleiben 100 % unverändert und frei von proprietären Feldern, um die Kompatibilität mit Clients wie Cursor, Codex oder OpenClaw zu garantieren.
+
+### Modellpreis-Tabelle & 24h-Persistenz
+
+Der Proxy lädt die Modellpreise einmalig vom Endpunkt `/api/v1/llm/models` und persistiert die Preistabelle atomar als JSON-Datei in `data/model_pricing_cache.json` mit einer **Lebensdauer (TTL) von 24 Stunden (86.400 Sekunden)**:
+- **Startup ohne Latenz:** Beim Start des Proxies wird die Preistabelle sofort aus der lokalen JSON-Datei geladen, sodass sofortige LLM-Anfragen ohne Backend-Preisanfrage abgerechnet werden können.
+- **Background Refresh:** Nach Ablauf der 24 Stunden wird der Refresh asynchron im Hintergrund ausgelöst, ohne den Client-Request zu blockieren.
+- **Fehlertoleranz:** Sollte die AcademicAI-Modell-API temporär nicht erreichbar sein, greift der Proxy transparent auf die zuletzt gespeicherte Preistabelle zurück.
+
+### Lokale Aggregation & Status-Endpunkt (`/internal/cost-status`)
+
+Der Proxy aggregiert die Kosten serverseitig in-memory und persistiert sie atomar in `data/local_cost_cache.json`.
+Der Endpunkt `GET /internal/cost-status` liefert:
+- `backend_cost_monitoring`: Status der AcademicAI-Kostenüberwachung (falls vorhanden).
+- `local_cost_tracking`:
+  - `all_time`: Gesamtkosten, Token-Summen und Request-Count.
+  - `today`: Aggregation für den aktuellen Tag (UTC).
+  - `this_month`: Aggregation für den aktuellen Monat (UTC).
+  - `by_model`: Aufschlüsselung pro Modell-ID.
+  - `by_client`: Aufschlüsselung nach anonymisiertem Client-Hash (`client_<sha256[:8]>`).
+  - `pricing_cache`: Cache-Status der Modellpreise (`models_cached`, `last_refreshed_at`, `is_stale`, `ttl_seconds`, `cache_file`).
+  - `recent_requests`: Ringpuffer der letzten 500 Requests (streng datenschutzkonform: nur Metadaten, keine Prompts, Completions oder API-Keys!).
+
+### Konfigurationsoptionen
+
+In der `.env` konfigurierbar:
+
+| Variable | Typ | Default | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `ACADEMICAI_ENABLE_LOCAL_COST_TRACKING` | bool | `true` | Aktiviert die lokale Kostenberechnung & Header |
+| `ACADEMICAI_COST_CURRENCY` | str | `EUR` | Währung für Abrechnung & Response-Header (Standard: EUR) |
+| `ACADEMICAI_MODEL_PRICING_CACHE_FILE` | str | `data/model_pricing_cache.json` | Pfad zur persistenten JSON-Preistabelle |
+| `ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS` | int | `86400` | Gültigkeitsdauer des Modellpreis-Caches in Sekunden (24 Stunden) |
+| `ACADEMICAI_LOCAL_COST_CACHE_FILE` | str | `data/local_cost_cache.json` | Pfad zur lokalen Aggregationsdatei |
+| `ACADEMICAI_LOCAL_COST_HISTORY_LIMIT` | int | `500` | Maximale Einträge im Ringpuffer der Request-Historie |
+
 
 
 ## Authentication
@@ -181,6 +249,30 @@ Quick start for local testing:
 ```powershell
 .\run_local_tests.ps1 -Mode offline
 ```
+
+## Model connectivity & diagnostic CLI
+
+The repository includes a versatile CLI tool [`test_models_connectivity.py`](test_models_connectivity.py) to inspect registered models, pricing, and connectivity:
+
+```bash
+# 1. Quick overview of available upstream models & pricing (no completion tokens used):
+python test_models_connectivity.py --upstream --list
+
+# 2. Test a single model directly against the AcademicAI upstream backend:
+python test_models_connectivity.py --upstream -m gpt-5-mini
+
+# 3. Test all models via the running local proxy (port 11435):
+python test_models_connectivity.py
+
+# 4. Test a specific model family via local proxy:
+python test_models_connectivity.py -m claude
+```
+
+Key features:
+- **Dual-Mode**: Test through local proxy or directly against upstream BOKU AcademicAI API (`--upstream` / `-u`).
+- **Precise Error Diagnostics**: Formats OpenAI-style `error.message`, BOKU `meta.error.message` (e.g. `Cost limit reached`), and FastAPI details without masking.
+- **Model Listing**: Formats context window, output token limit, and normalized input/output costs in €/1M tokens (`--list` / `-l`).
+
 
 ## Runtime hardening defaults
 
@@ -432,9 +524,11 @@ academicai-proxy/
     app.py               # FastAPI application factory & ASGI lifespan
     auth.py              # AcademicAI authentication & header injection
     config.py            # Typed settings & environment parsing
+    cost_calculation.py  # ModelPricingCache & Decimal request cost calculation
     cost_monitoring.py   # Atomic cache & cost status
     errors.py            # Standardized OpenAI error mapping
     humanization.py      # Target channel detection & 2nd-pass rewriting
+    local_cost_tracker.py # LocalCostStore, aggregations & ring-buffer history
     logging_config.py    # Rotating file handlers & uvicorn wiring
     provider.py          # HTTP transport to AcademicAI backend
     request_guards.py    # Inbound payload validation & rate limiting
@@ -453,7 +547,7 @@ academicai-proxy/
   start_server.ps1       # Controlled service startup
   stop_server.ps1        # Controlled service shutdown
   run_local_tests.ps1    # Offline and E2E test runner
-  tests/                 # Comprehensive test suite (185+ tests)
+  tests/                 # Comprehensive test suite (225+ tests)
   requirements.txt
   README.md
 ```

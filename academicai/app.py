@@ -33,9 +33,22 @@ from academicai.config import (
     DEFAULT_TOOL_TEMPERATURE,
     DEFAULT_TOOL_VERBOSITY,
     ENABLE_HUMANIZATION_PASS,
+    ENABLE_LOCAL_COST_TRACKING,
+    MODEL_PRICING_CACHE_TTL_SECONDS,
+    LOCAL_COST_CACHE_FILE,
+    LOCAL_COST_HISTORY_LIMIT,
     MAX_REQUEST_JSON_CHARS,
     STREAM_CHUNK_DELAY_MS,
     validate_config,
+)
+from academicai.cost_calculation import (
+    calculate_request_cost,
+    get_pricing_cache,
+    RequestCost,
+)
+from academicai.local_cost_tracker import (
+    get_local_cost_store,
+    LocalCostStore,
 )
 from academicai.cost_monitoring import (
     build_cost_headers,
@@ -91,6 +104,9 @@ _last_user_text = last_user_text
 _apply_post_tool_guard = apply_post_tool_guard
 _is_human_readable_target = is_human_readable_target
 _run_humanization_pass = run_humanization_pass
+_calculate_request_cost = calculate_request_cost
+_get_pricing_cache = get_pricing_cache
+_get_local_cost_store = get_local_cost_store
 
 _INITIAL_DEFAULTS: dict[str, Any] = {
     "validate_config": validate_config,
@@ -106,6 +122,12 @@ _INITIAL_DEFAULTS: dict[str, Any] = {
     "get_cost_status_payload": get_cost_status_payload,
     "build_cost_headers": build_cost_headers,
     "_build_cost_headers": build_cost_headers,
+    "calculate_request_cost": calculate_request_cost,
+    "_calculate_request_cost": calculate_request_cost,
+    "get_pricing_cache": get_pricing_cache,
+    "_get_pricing_cache": get_pricing_cache,
+    "get_local_cost_store": get_local_cost_store,
+    "_get_local_cost_store": get_local_cost_store,
     "validate_request_json_size": validate_request_json_size,
     "validate_chat_request_body": validate_chat_request_body,
     "_validate_chat_request_body": validate_chat_request_body,
@@ -127,6 +149,7 @@ _INITIAL_DEFAULTS: dict[str, Any] = {
     "API_KEY": API_KEY,
     "MAX_REQUEST_JSON_CHARS": MAX_REQUEST_JSON_CHARS,
     "ENABLE_HUMANIZATION_PASS": ENABLE_HUMANIZATION_PASS,
+    "ENABLE_LOCAL_COST_TRACKING": ENABLE_LOCAL_COST_TRACKING,
     "DEFAULT_CHAT_TEMPERATURE": DEFAULT_CHAT_TEMPERATURE,
     "DEFAULT_TOOL_TEMPERATURE": DEFAULT_TOOL_TEMPERATURE,
     "DEFAULT_CHAT_VERBOSITY": DEFAULT_CHAT_VERBOSITY,
@@ -268,7 +291,28 @@ def cost_status(key: str = Depends(verify_key)):
         cache_fn = _get_setting("get_cost_cache_with_lazy_refresh", get_cost_cache_with_lazy_refresh)
     payload_fn = _get_setting("get_cost_status_payload", get_cost_status_payload)
     cache = cache_fn()
-    return payload_fn(cache)
+    base_payload = payload_fn(cache)
+
+    # Local cost tracking status
+    store_fn = _get_setting("_get_local_cost_store") or _get_setting(
+        "get_local_cost_store", get_local_cost_store
+    )
+    store = store_fn()
+    local_status = store.get_status_payload()
+
+    # Pricing cache status
+    pricing_cache_fn = _get_setting("_get_pricing_cache") or _get_setting(
+        "get_pricing_cache", get_pricing_cache
+    )
+    pricing_cache = pricing_cache_fn()
+    local_status["pricing_cache"] = pricing_cache.get_status()
+
+    # Merged payload: preserves all root keys for backward compatibility
+    # and adds structured sections for both backend monitoring and local tracking.
+    payload = dict(base_payload)
+    payload["backend_cost_monitoring"] = dict(base_payload)
+    payload["local_cost_tracking"] = local_status
+    return payload
 
 
 async def list_models(key: str = Depends(verify_key)):
@@ -521,6 +565,25 @@ async def chat_completions(request: Request, key: str = Depends(verify_key)):
         log.error(f"completion failed: model={model} error={e}")
         raise HTTPException(status_code=502, detail=str(e))
 
+    # Lokale Kostenberechnung & Header
+    enable_local_cost = bool(_get_setting("ENABLE_LOCAL_COST_TRACKING", ENABLE_LOCAL_COST_TRACKING))
+    if enable_local_cost:
+        cost_calc_fn = _get_setting("_calculate_request_cost") or _get_setting(
+            "calculate_request_cost", calculate_request_cost
+        )
+        usage = result.usage or {}
+        req_cost = cost_calc_fn(
+            model=result.model,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+        )
+        store_fn = _get_setting("_get_local_cost_store") or _get_setting(
+            "get_local_cost_store", get_local_cost_store
+        )
+        store = store_fn()
+        store.record_request(req_cost, client_key=key)
+        response_headers.update(req_cost.to_headers())
+
     # Wenn Streaming gewünscht: Antwort als SSE emulieren
     if want_stream:
         stream_delay_ms = _get_setting("STREAM_CHUNK_DELAY_MS", STREAM_CHUNK_DELAY_MS)
@@ -638,6 +701,25 @@ async def responses(request: Request, key: str = Depends(verify_key)):
     except Exception as e:
         log.error(f"Responses completion failed: model={model} error={e}")
         raise HTTPException(status_code=502, detail=str(e))
+
+    # Lokale Kostenberechnung & Header
+    enable_local_cost = bool(_get_setting("ENABLE_LOCAL_COST_TRACKING", ENABLE_LOCAL_COST_TRACKING))
+    if enable_local_cost:
+        cost_calc_fn = _get_setting("_calculate_request_cost") or _get_setting(
+            "calculate_request_cost", calculate_request_cost
+        )
+        usage = result.usage or {}
+        req_cost = cost_calc_fn(
+            model=result.model,
+            prompt_tokens=usage.get("prompt_tokens", 0),
+            completion_tokens=usage.get("completion_tokens", 0),
+        )
+        store_fn = _get_setting("_get_local_cost_store") or _get_setting(
+            "get_local_cost_store", get_local_cost_store
+        )
+        store = store_fn()
+        store.record_request(req_cost, client_key=key)
+        response_headers.update(req_cost.to_headers())
 
     if want_stream:
         stream_delay_ms = _get_setting("STREAM_CHUNK_DELAY_MS", STREAM_CHUNK_DELAY_MS)
