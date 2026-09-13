@@ -147,6 +147,15 @@ supports_websockets = false
 Ausführliche Details zu Tools, Multi-Turn-Roundtrips und Modellwahl findest du in [`docs/codex.md`](docs/codex.md).
 
 
+## OpenCode & OpenChamber Integration
+
+Der Proxy dient als primäres LLM-Backend für [OpenCode](https://opencode.ai) und das Web-/PWA-Frontend [OpenChamber](https://github.com/openchamber/web) via `@ai-sdk/openai-compatible`.
+
+- **Konfigurationsanleitung:** Vollständige Einrichtung und Tailscale-Sicherheitsarchitektur siehe [`docs/opencode-openchamber.md`](docs/opencode-openchamber.md).
+- **Modell-Charakteristiken:** In `opencode.json` sollten `limit.context`, `limit.output`, `tool_call` und `reasoning` stets explizit hinterlegt werden, um konservative Fallbacks (4k/8k) zu vermeiden.
+- **Empfehlung: 256k-Kontextgrenze:** Für Modelle mit 1M+ Backend-Kapazität (`gpt-5.5`, `claude-opus-4-8`, `gemini-3.5-flash`) empfiehlt sich ein Cap auf `context: 256000` (256k Tokens). Das schützt das Token-Budget vor versehentlicher Erschöpfung bei langen Sessions, hält Antwortzeiten kurz und bietet mit ~800–1.000 Buchseiten Text mehr als genug Raum.
+
+
 ## Local test environment
 
 The repository now includes a separate local test setup:
