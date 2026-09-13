@@ -42,12 +42,53 @@ def test_parse_model_costs_tiered():
         {"costType": "output_tokens", "cost": 0.005},
         {"costType": "output_tokens", "cost": 0.01},
     ]
-    pricing = parse_model_costs("gemini-2.5-pro", raw_costs)
+    pricing = parse_model_costs("gemini-2.5-pro", raw_costs, context_window=1048576)
     assert pricing.model_id == "gemini-2.5-pro"
-    # Base/first tier selected
+    # Lowest / base tier selected
     assert pricing.input_cost_per_token == Decimal("0.00000125")
     assert pricing.output_cost_per_token == Decimal("0.000005")
     assert pricing.is_tiered is True
+    assert len(pricing.tiers) == 2
+    assert pricing.tiers[0]["tier"] == 1
+    assert pricing.tiers[0]["name"] == "short_context"
+    assert pricing.tiers[0]["max_prompt_tokens"] == 128000
+    assert pricing.tiers[0]["input_cost_per_token"] == "0.00000125"
+    assert pricing.tiers[0]["output_cost_per_token"] == "0.000005"
+    assert pricing.tiers[1]["tier"] == 2
+    assert pricing.tiers[1]["name"] == "long_context"
+    assert pricing.tiers[1]["max_prompt_tokens"] == 1048576
+    assert pricing.tiers[1]["input_cost_per_token"] == "0.0000025"
+    assert pricing.tiers[1]["output_cost_per_token"] == "0.00001"
+
+
+def test_parse_model_costs_tiered_unordered_picks_lowest():
+    # Reverse/mixed order: higher rates come first
+    raw_costs = [
+        {"costType": "output_tokens", "cost": 0.0495},
+        {"costType": "input_tokens", "cost": 0.011},
+        {"costType": "output_tokens", "cost": 0.033},
+        {"costType": "input_tokens", "cost": 0.0055},
+    ]
+    pricing = parse_model_costs("gpt-5.5", raw_costs, context_window=1050000)
+    assert pricing.model_id == "gpt-5.5"
+    # MUST pick lowest rate for baseline
+    assert pricing.input_cost_per_token == Decimal("0.0000055")
+    assert pricing.output_cost_per_token == Decimal("0.000033")
+    assert pricing.is_tiered is True
+    # Verify tiers are sorted ascending
+    assert len(pricing.tiers) == 2
+    assert pricing.tiers[0]["input_cost_per_token"] == "0.0000055"
+    assert pricing.tiers[0]["output_cost_per_token"] == "0.000033"
+    assert pricing.tiers[1]["input_cost_per_token"] == "0.000011"
+    assert pricing.tiers[1]["output_cost_per_token"] == "0.0000495"
+    # Serialization roundtrip
+    d = pricing.to_dict()
+    assert "tiers" in d
+    assert len(d["tiers"]) == 2
+    restored = ModelEntry.from_dict(d)
+    assert restored.tiers == pricing.tiers
+    assert restored.input_cost_per_token == Decimal("0.0000055")
+    assert restored.output_cost_per_token == Decimal("0.000033")
 
 
 def test_parse_model_costs_per_request():

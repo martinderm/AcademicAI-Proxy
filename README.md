@@ -125,8 +125,8 @@ AcademicAI aggregiert Modelle über Google Cloud (Vertex AI) und Microsoft Azure
      - [Azure Retail Prices API](https://prices.azure.com/api/retail/prices) (Meters `5.5 ShortCo inp Dz` / `5.5 LongCo inp Dz`).
 
 > [!NOTE]
-> **Abgrenzung: Abrechnungsschwelle (128k) vs. Client-Empfehlung (256k)**  
-> In unserer Client-Konfiguration für OpenCode/OpenChamber (siehe unten) empfehlen wir ein Cap von `limit.context: 256000` (256k), um gigantische Sessions vor 1M Tokens automatisch zu prunen. Bei Prompts zwischen 128k und 256k greift beim Provider bereits die Long-Context-Stufe (Tier 2). Wer garantiert immer im Basistarif bleiben möchte, setzt den Client auf `limit.context: 128000`.
+> **Praxis-Standard: 128k-Limit garantiert Basis-Tarif (Tier 1)**  
+> In unserer Client-Konfiguration für OpenCode/OpenChamber (siehe unten) setzen wir standardmäßig ein Cap von `limit.context: 128000` (128k Tokens). Dies garantiert, dass alle Anfragen ausnahmslos in der günstigsten Basis-Preisstufe (Tier 1) abgerechnet werden und die teurere Long-Context-Stufe (Tier 2) niemals getriggert wird. Im `ModelCatalog` (`data/model_catalog.json`) sind dennoch sämtliche Tiers vollständig und sortiert hinterlegt.
 
 ### Response-Headers
 
@@ -249,7 +249,7 @@ Der Proxy dient als primäres LLM-Backend für [OpenCode](https://opencode.ai) u
 
 - **Konfigurationsanleitung:** Vollständige Einrichtung und Tailscale-Sicherheitsarchitektur siehe [`docs/opencode-openchamber.md`](docs/opencode-openchamber.md).
 - **Modell-Charakteristiken:** In `opencode.json` sollten `limit.context`, `limit.output`, `tool_call` und `reasoning` stets explizit hinterlegt werden, um konservative Fallbacks (4k/8k) zu vermeiden.
-- **Empfehlung: 256k-Kontextgrenze:** Für Modelle mit 1M+ Backend-Kapazität (`gpt-5.5`, `claude-opus-4-8`, `gemini-3.5-flash`) empfiehlt sich ein Cap auf `context: 256000` (256k Tokens). Das schützt das Token-Budget vor versehentlicher Erschöpfung bei langen Sessions, hält Antwortzeiten kurz und bietet mit ~800–1.000 Buchseiten Text mehr als genug Raum.
+- **Empfehlung: 128k-Kontextgrenze:** Da Upstream-Tarife (wie Azure OpenAI und Google Vertex) sowie AcademicAI oberhalb von 128k Tokens signifikant teurer werden (Long-Context-Stufe / Tier 2 mit doppeltem Input-Preis), wird für alle Modelle ein striktes Cap auf `context: 128000` (128k Tokens) gesetzt. Dies hält alle Sessions garantiert im günstigsten Basistarif, schützt das Budget vor unerwarteten Kostensprüngen und bietet mit ~400–500 Buchseiten Text ausreichend Raum für produktive Coding-Workflows.
 
 
 ## Local test environment

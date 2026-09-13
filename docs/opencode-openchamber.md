@@ -107,7 +107,7 @@ Erstelle oder ergänze die Datei mit dem Provider `academicai`:
           "tool_call": true,
           "reasoning": true,
           "limit": {
-            "context": 256000,
+            "context": 128000,
             "output": 128000
           }
         },
@@ -116,7 +116,7 @@ Erstelle oder ergänze die Datei mit dem Provider `academicai`:
           "tool_call": true,
           "reasoning": true,
           "limit": {
-            "context": 256000,
+            "context": 128000,
             "output": 128000
           }
         },
@@ -125,7 +125,7 @@ Erstelle oder ergänze die Datei mit dem Provider `academicai`:
           "tool_call": true,
           "reasoning": true,
           "limit": {
-            "context": 200000,
+            "context": 128000,
             "output": 100000
           }
         },
@@ -134,7 +134,7 @@ Erstelle oder ergänze die Datei mit dem Provider `academicai`:
           "tool_call": true,
           "reasoning": true,
           "limit": {
-            "context": 256000,
+            "context": 128000,
             "output": 128000
           }
         },
@@ -143,7 +143,7 @@ Erstelle oder ergänze die Datei mit dem Provider `academicai`:
           "tool_call": true,
           "reasoning": false,
           "limit": {
-            "context": 256000,
+            "context": 128000,
             "output": 65535
           }
         }
@@ -155,50 +155,46 @@ Erstelle oder ergänze die Datei mit dem Provider `academicai`:
 
 > **Wichtig:** OpenCode unterstützt native Token-Substitution via `{env:VARIABLE}`. Der API-Schlüssel verbleibt in der Umgebung (`ACADEMICAI_PROXY_API_KEY`) und wird nicht in der JSON-Datei gespeichert.
 
-### Best Practice: Modellcharakteristiken explizit definieren
+### Modell-Parameter & Limits
 
 Bei benutzerdefinierten Providern (`@ai-sdk/openai-compatible`) kann OpenCode die technischen Parameter und Fähigkeiten der Upstream-Modelle nicht automatisch auflösen. Es wird daher **dringend empfohlen**, für jedes Modell in `opencode.json` die spezifischen Charakteristiken explizit zu setzen:
 
 1. **`limit.context` & `limit.output` (Kontextfenster und Ausgabelimits):**
    - **Kontextauslastung:** OpenChamber kann den Token-Verbrauch nur dann akkurat im Chat-Interface visualisieren, wenn das reale Kontextfenster hinterlegt ist.
-   - **Pruning & Kompaktierung:** Ohne explizite Limits greift OpenCode auf konservative Standardannahmen zurück (z. B. 4k oder 8k Tokens). Dadurch blieben gigantische Kontextfenster (wie 1 Million Tokens bei `claude-opus-4-8` oder `gpt-5.5`) ungenutzt, oder Sessions würden vorzeitig und unnötig aggressiv zusammengefasst.
+   - **Pruning & Kompaktierung:** Ohne explizite Limits greift OpenCode auf konservative Standardannahmen zurück (z. B. 4k oder 8k Tokens).
 2. **`reasoning` (`true` / `false`):**
    - Signalisiert OpenCode, ob das Modell interne Denkprozesse (Chain-of-Thought / Thinking) besitzt. Steuert die Darstellung und Behandlung von Denkblöcken (`collapsibleThinkingBlocks`) im UI.
 3. **`tool_call` (`true` / `false`):**
    - Bestimmt, ob OpenCode Werkzeuge (Dateizugriffe, Terminal, LSP) an das Modell weiterreicht. Reine Such- oder Chatmodelle sollten auf `false` stehen.
 
 > [!TIP]
-> **Praxis-Empfehlung: Kontextfenster großer Modelle auf 256k begrenzen (`context: 256000`)**
+> **Praxis-Standard: Kontextfenster aller Modelle auf 128k begrenzen (`context: 128000`)**
 > 
-> Obwohl Modelle wie `gpt-5.5` oder `claude-opus-4-8` im Backend bis zu 1 Million Tokens unterstützen, wird für den alltäglichen Einsatz in OpenCode empfohlen, `limit.context` auf **`256000`** (256k) zu begrenzen:
-> - **Budget- & Kostenschutz:** Verhindert, dass bei langen iterativen Sessions unbemerkt mehrere Hunderttausend Tokens pro Request übertragen und vom Budget abgezogen werden.
-> - **Performance & Latenz:** Hält die Antwort- und Streamingzeiten spürbar kürzer.
-> - **Frühzeitige Kompaktierung (Pruning):** OpenCode fasst Chatverläufe rechtzeitig vor 256k zusammen, anstatt den Kontext bis an die Budgetgrenze anschwellen zu lassen.
-> - **Ausreichend Raum:** 256k Tokens entsprechen rund 800–1.000 Buchseiten Text – das genügt selbst für umfangreiche Repositories, Refactorings und Dokumentensammlungen vollkommen.
-> 
-> **Wichtiger Hinweis zum Upstream-Tarif (128k-Grenze):**  
-> Die Upstream-Provider Google (Vertex AI) und Microsoft (Azure OpenAI) staffeln ihre Tarife bei **128k Input-Tokens** (`128.000`). Prompts über 128k Tokens werden mit dem doppelten Input-Preis abgerechnet (z. B. bei `gpt-5.5` springt der Input von € 5,50 auf € 11,00 / 1M).  
-> *Wer strikt im Basis-Tarif bleiben möchte, setzt `context: 128000`.* Das 256k-Cap ist der empfohlene Mittelweg zwischen extrem großem Kontext und Schutz vor 1M-Überläufen.
+> In der Praxis wird für alle Modelle in OpenCode/OpenChamber empfohlen, `limit.context` standardmäßig auf **`128000`** (128k Tokens) zu setzen:
+> - **100 % Tarifschutz (Basis-Preisstufe):** Sowohl Google (Vertex AI) als auch Microsoft (Azure OpenAI) staffeln ihre Tarife bei **128k Input-Tokens** (`128.000`). Ein Limit von 128k stellt sicher, dass Anfragen ausnahmslos in der günstigsten Basis-Preisstufe (Tier 1) abgerechnet werden und niemals der verdoppelte Long-Context-Zuschlag anfällt.
+> - **Ausreichend Raum:** 128k Tokens entsprechen rund 400–500 Buchseiten Text – das bietet selbst für komplexe Codebases und Multi-File-Refactorings mehr als genug Kontext.
+> - **Laufzeit-Performance & Latenz:** Hält Antwort- und Streamingzeiten schnell und berechenbar.
+> - **Frühzeitige Kompaktierung (Pruning):** OpenCode fasst Chatverläufe rechtzeitig vor 128k zusammen, wodurch Sitzungen nicht unkontrolliert anschwellen.
 
 #### Referenztabelle aller AcademicAI-Modelle
 
-| Modell-ID | Anzeigename | `context` | `output` | `tool_call` | `reasoning` |
+| Modell-ID | Anzeigename | `context` (Praxis-Limit) | `output` | `tool_call` | `reasoning` |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `gpt-5.5` | GPT-5.5 | `256000` (Backend: 1,05M) | `128000` | `true` | `true` |
-| `gpt-5.2` | GPT-5.2 | `256000` (Backend: 400k) | `128000` | `true` | `true` |
-| `gpt-5` | GPT-5 | `256000` (Backend: 400k) | `128000` | `true` | `true` |
-| `gpt-5-mini` | GPT-5 Mini | `256000` (Backend: 400k) | `128000` | `true` | `true` |
-| `gpt-5-nano` | GPT-5 Nano | `256000` (Backend: 400k) | `128000` | `true` | `true` |
+| `gpt-5.5` | GPT-5.5 | `128000` (Backend: 1,05M) | `128000` | `true` | `true` |
+| `gpt-5.2` | GPT-5.2 | `128000` (Backend: 400k) | `128000` | `true` | `true` |
+| `gpt-5` | GPT-5 | `128000` (Backend: 400k) | `128000` | `true` | `true` |
+| `gpt-5-mini` | GPT-5 Mini | `128000` (Backend: 400k) | `128000` | `true` | `true` |
+| `gpt-5-nano` | GPT-5 Nano | `128000` (Backend: 400k) | `128000` | `true` | `true` |
 | `gpt-4o` | GPT-4o | `128000` | `16384` | `true` | `false` |
-| `o3` | o3 | `200000` | `100000` | `true` | `true` |
-| `claude-opus-4-8` | Claude Opus 4.8 | `256000` (Backend: 1M) | `128000` | `true` | `true` |
-| `claude-opus-4-6` | Claude Opus 4.6 | `256000` (Backend: 1M) | `128000` | `true` | `true` |
-| `gemini-3.5-flash` | Gemini 3.5 Flash | `256000` (Backend: 1M) | `65535` | `true` | `false` |
-| `gemini-3.1-flash-lite`| Gemini 3.1 Flash Lite | `256000` (Backend: 1M) | `65535` | `true` | `false` |
-| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | `256000` (Backend: 1M) | `65535` | `true` | `false` |
-| `gemini-2.5-pro` | Gemini 2.5 Pro | `256000` (Backend: 1M) | `65535` | `true` | `false` |
-| `Mistral-Large-3` | Mistral Large 3 | `256000` | `4096` | `true` | `false` |
-| `sonar-pro` | Sonar Pro | `200000` | `8192` | `false` | `false` |
+| `o3` | o3 | `128000` (Backend: 200k) | `100000` | `true` | `true` |
+| `claude-opus-4-8` | Claude Opus 4.8 | `128000` (Backend: 1M) | `128000` | `true` | `true` |
+| `claude-opus-4-6` | Claude Opus 4.6 | `128000` (Backend: 1M) | `128000` | `true` | `true` |
+| `gemini-3.5-flash` | Gemini 3.5 Flash | `128000` (Backend: 1M) | `65535` | `true` | `false` |
+| `gemini-3.1-flash-lite`| Gemini 3.1 Flash Lite | `128000` (Backend: 1M) | `65535` | `true` | `false` |
+| `gemini-3.1-pro-preview` | Gemini 3.1 Pro Preview | `128000` (Backend: 1M) | `65535` | `true` | `false` |
+| `gemini-2.5-pro` | Gemini 2.5 Pro | `128000` (Backend: 1M) | `65535` | `true` | `false` |
+| `Mistral-Large-3` | Mistral Large 3 | `128000` (Backend: 256k) | `4096` | `true` | `false` |
+| `sonar-pro` | Sonar Pro | `128000` (Backend: 200k) | `8192` | `false` | `false` |
 | `sonar-reasoning-pro` | Sonar Reasoning Pro | `128000` | `4096` | `false` | `true` |
 
 Verifikation der Provider-Erkennung:

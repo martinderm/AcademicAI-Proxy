@@ -64,6 +64,7 @@ class ModelPricing:
         raw_costs: Optional[list[dict[str, Any]]] = None,
         context_window: Optional[int] = None,
         output_token_limit: Optional[int] = None,
+        tiers: Optional[list[dict[str, Any]]] = None,
     ):
         self.model_id = model_id
         self.input_cost_per_token = input_cost_per_token
@@ -74,6 +75,7 @@ class ModelPricing:
         self.raw_costs = list(raw_costs or [])
         self.context_window = context_window
         self.output_token_limit = output_token_limit
+        self.tiers = list(tiers or [])
 
     @property
     def currency(self) -> str:
@@ -98,6 +100,8 @@ class ModelPricing:
             d["context_window"] = self.context_window
         if self.output_token_limit is not None:
             d["output_token_limit"] = self.output_token_limit
+        if self.tiers:
+            d["tiers"] = self.tiers
         if self._currency:
             d["currency"] = self._currency
         return d
@@ -107,6 +111,7 @@ class ModelPricing:
         curr = data.get("currency") or default_currency
         ctx_win = data.get("context_window")
         out_lim = data.get("output_token_limit")
+        tiers = data.get("tiers")
         return cls(
             model_id=str(data.get("model_id", "")),
             input_cost_per_token=Decimal(str(data.get("input_cost_per_token", "0"))),
@@ -117,6 +122,7 @@ class ModelPricing:
             raw_costs=list(data.get("raw_costs", [])),
             context_window=int(ctx_win) if ctx_win is not None else None,
             output_token_limit=int(out_lim) if out_lim is not None else None,
+            tiers=list(tiers) if tiers is not None else None,
         )
 
     def __repr__(self) -> str:
@@ -128,11 +134,14 @@ class ModelPricing:
             f"output_cost_per_token={self.output_cost_per_token}, "
             f"per_request_cost={self.per_request_cost}, "
             f"currency={self.currency!r}, "
-            f"is_tiered={self.is_tiered})"
+            f"is_tiered={self.is_tiered}, "
+            f"tiers={self.tiers})"
         )
 
 
 ModelEntry = ModelPricing  # Alias for unified catalog terminology
+
+TIER_THRESHOLD_SHORT_CONTEXT = 128000
 
 
 def parse_model_costs(
@@ -145,14 +154,23 @@ def parse_model_costs(
     Parses AcademicAI's costs array and model metadata.
     AcademicAI reports input_tokens and output_tokens costs per 1,000 tokens (1k tokens).
     Normalized rate per single token = Decimal(cost) / Decimal(1000).
+
+    Guarantees:
+    - input_rates and output_rates are sorted ascending.
+    - Baseline rates (input_cost_per_token, output_cost_per_token) always use the LOWEST price.
+    - All pricing tiers are structured and sorted under `tiers`.
     """
     input_rates: list[Decimal] = []
     output_rates: list[Decimal] = []
     per_request_rate = Decimal("0")
 
-    for entry in raw_costs:
-        if not isinstance(entry, dict):
-            continue
+    # Sort raw costs deterministically by costType then cost
+    sorted_raw_costs = sorted(
+        [e for e in raw_costs if isinstance(e, dict)],
+        key=lambda x: (str(x.get("costType", "")), float(x.get("cost", 0) or 0)),
+    )
+
+    for entry in sorted_raw_costs:
         c_type = entry.get("costType")
         c_val = entry.get("cost")
         if c_val is None:
@@ -169,9 +187,45 @@ def parse_model_costs(
         elif c_type == "per_request":
             per_request_rate = d_val
 
+    input_rates.sort()
+    output_rates.sort()
+
     is_tiered = len(input_rates) > 1 or len(output_rates) > 1
+    # Lowest price is ALWAYS used as the baseline rate
     input_per_token = input_rates[0] if input_rates else Decimal("0")
     output_per_token = output_rates[0] if output_rates else Decimal("0")
+
+    # Build sorted tiers
+    tiers: list[dict[str, Any]] = []
+    if is_tiered:
+        # Tier 1 (Short Context <= 128k tokens, lowest price)
+        t1_in = input_rates[0] if input_rates else Decimal("0")
+        t1_out = output_rates[0] if output_rates else Decimal("0")
+        tiers.append({
+            "tier": 1,
+            "name": "short_context",
+            "max_prompt_tokens": TIER_THRESHOLD_SHORT_CONTEXT,
+            "input_cost_per_token": str(t1_in),
+            "output_cost_per_token": str(t1_out),
+        })
+        # Tier 2 (Long Context > 128k tokens)
+        t2_in = input_rates[-1] if input_rates else Decimal("0")
+        t2_out = output_rates[-1] if output_rates else Decimal("0")
+        tiers.append({
+            "tier": 2,
+            "name": "long_context",
+            "max_prompt_tokens": context_window,
+            "input_cost_per_token": str(t2_in),
+            "output_cost_per_token": str(t2_out),
+        })
+    else:
+        tiers.append({
+            "tier": 1,
+            "name": "standard",
+            "max_prompt_tokens": context_window,
+            "input_cost_per_token": str(input_per_token),
+            "output_cost_per_token": str(output_per_token),
+        })
 
     return ModelPricing(
         model_id=model_id,
@@ -180,9 +234,10 @@ def parse_model_costs(
         per_request_cost=per_request_rate,
         currency=None,
         is_tiered=is_tiered,
-        raw_costs=list(raw_costs),
+        raw_costs=sorted_raw_costs,
         context_window=context_window,
         output_token_limit=output_token_limit,
+        tiers=tiers,
     )
 
 
