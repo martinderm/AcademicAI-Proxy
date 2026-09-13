@@ -4,29 +4,29 @@
 
 ### 📋 Persistent 24h Model Catalog & Zero-Latency Discovery
 - **Unified Local Model Catalog (`academicai/cost_calculation.py`)**:
-  - Expanded the model pricing cache into a persistent 24h **Local Model Catalog** (`data/model_catalog.json`, `ModelCatalog`), capturing full model metadata (`context_window` / `contextWindow`, `output_token_limit` / `outputTokenLimit`) alongside pricing structures (`costs`).
-  - Single Source of Truth (SSOT) for registered models, token limits, and pricing with automatic migration fallback from legacy `data/model_pricing_cache.json`.
+  - Upgraded model tracking into a persistent 24h **Local Model Catalog** (`data/model_catalog.json`, `ModelCatalog`), capturing full model metadata (`context_window` / `contextWindow`, `output_token_limit` / `outputTokenLimit`) alongside pricing structures (`costs`).
+  - Single Source of Truth (SSOT) for registered models, token limits, and pricing.
 - **Zero-Latency Model Discovery (`GET /v1/models`)**:
   - `AcademicAIProvider.get_models()` and `GET /v1/models` now serve directly from the in-memory `ModelCatalog` via `to_openai_models_response()`.
   - Eliminates the 200–500ms upstream network roundtrip on every client tool startup (OpenCode, Codex, OpenClaw), providing sub-millisecond responses and complete resilience against upstream network outages.
-- **Unified Configuration & Backward Compatibility**:
-  - Configurable via `ACADEMICAI_MODEL_CATALOG_FILE` and `ACADEMICAI_MODEL_CATALOG_TTL_SECONDS` (default: 86400s / 24h), while preserving `ACADEMICAI_MODEL_PRICING_CACHE_*` aliases.
-  - Re-exports across `server.py` and `academicai/__init__.py` (`ModelCatalog`, `ModelEntry`, `get_model_catalog`, `ModelPricingCache`, `get_pricing_cache`).
-  - Extended `/internal/cost-status` to report `model_catalog` status alongside `pricing_cache`.
+- **Clean Configuration & Domain Exports**:
+  - Configurable via `ACADEMICAI_MODEL_CATALOG_FILE` and `ACADEMICAI_MODEL_CATALOG_TTL_SECONDS` (default: 86400s / 24h).
+  - Clean domain exports across `server.py` and `academicai/__init__.py` (`ModelCatalog`, `ModelEntry`, `get_model_catalog`).
+  - Extended `/internal/cost-status` to report `model_catalog` status.
 - **Comprehensive Unit Tests**:
-  - Extended `tests/test_cost_calculation_unit.py` (23 passing tests) and `tests/test_config.py` verifying catalog serialization, OpenAI response formatting, metadata extraction, and fallback paths.
+  - Extended `tests/test_cost_calculation_unit.py` (22 passing tests) and `tests/test_config.py` verifying catalog serialization, OpenAI response formatting, and metadata extraction.
 
 ## 0.8.0 - 2026-09-13
 
 ### 💰 Robust Autonomous Local Request Cost Calculation
 - **Autonomous Request-Level Cost Accounting**: Combines model pricing metadata from `/api/v1/llm/models` with actual response token usage (`prompt_tokens`, `completion_tokens`, `total_tokens`), completely eliminating dependence on the restricted `/api/v1/cost/` backend endpoint (`ACCESS_API_MONITOR_CREDIT` 403 Forbidden).
 - **Dynamic Model Pricing Cache (`academicai/cost_calculation.py`)**:
-  - Thread- and async-safe caching of `/api/v1/llm/models` pricing with configurable 24-hour TTL (default 86400s, `ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS`).
-  - Atomic JSON disk persistence (`data/model_pricing_cache.json`) for zero-latency startup and offline/upstream outage fallback.
+  - Thread- and async-safe caching of `/api/v1/llm/models` pricing with configurable 24-hour TTL (default 86400s, `ACADEMICAI_MODEL_CATALOG_TTL_SECONDS`).
+  - Atomic JSON disk persistence (`data/model_catalog.json`) for zero-latency startup and offline/upstream outage fallback.
   - Empirical 1k-token pricing normalization: converts AcademicAI's per-1,000-token costs into per-token rates (`Decimal(cost) / 1000`).
   - High-precision `Decimal` arithmetic throughout to prevent floating-point drift on micro-cents.
   - Standardized default currency: `EUR` (configurable via `ACADEMICAI_COST_CURRENCY`).
-  - **Currency SSOT Harmonization**: Top-level `currency: "EUR"` stored once as Single Source of Truth in `data/model_pricing_cache.json` with dynamic delegation from `ModelPricing`, eliminating redundant per-model repetitions.
+  - **Currency SSOT Harmonization**: Top-level `currency: "EUR"` stored once as Single Source of Truth in `data/model_catalog.json` with dynamic delegation from `ModelPricing`, eliminating redundant per-model repetitions.
   - Graceful degradation: cached fallback on network issues; fallback to base tier with `is_estimated = True` for tiered context models.
 - **Diagnostic CLI Upgrade (`test_models_connectivity.py`)**:
   - Dual-mode architecture: test local running proxy (default) or bypass proxy to test directly against AcademicAI upstream (`--upstream` / `-u`).

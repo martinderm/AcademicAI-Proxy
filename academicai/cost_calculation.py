@@ -1,9 +1,9 @@
 """
-AcademicAI Local Cost Calculation — Dynamic Model Pricing Cache & High-Precision Decimal Math.
+AcademicAI Local Cost Calculation & 24h Model Catalog.
 
 Provides:
-- ModelPricing: normalized per-token pricing structure derived from AcademicAI /api/v1/llm/models
-- ModelPricingCache: thread-safe, TTL-based caching with graceful error fallback
+- ModelEntry / ModelPricing: normalized per-token pricing structure and metadata derived from AcademicAI /api/v1/llm/models
+- ModelCatalog: thread-safe, persistent 24h catalog with graceful error fallback and OpenAI /v1/models formatting
 - RequestCost: high-precision Decimal cost calculation per LLM request with standardized response headers
 - calculate_request_cost: pure calculation function combining token usage and model pricing
 """
@@ -79,7 +79,7 @@ class ModelPricing:
     def currency(self) -> str:
         if self._currency is not None:
             return self._currency
-        return get_pricing_cache().currency
+        return get_model_catalog().currency
 
     @currency.setter
     def currency(self, val: Optional[str]) -> None:
@@ -216,22 +216,22 @@ def calculate_request_cost(
     prompt_tokens: int,
     completion_tokens: int,
     pricing_map: Optional[dict[str, ModelPricing]] = None,
-    pricing_cache: Optional["ModelPricingCache"] = None,
+    catalog: Optional["ModelCatalog"] = None,
 ) -> RequestCost:
     """
     Calculates exact request-level cost using Decimal precision.
     """
     pricing: Optional[ModelPricing] = None
-    cache = pricing_cache or get_pricing_cache()
+    cat = catalog or get_model_catalog()
     if pricing_map is not None:
         pricing = pricing_map.get(model)
     else:
-        pricing = cache.get_pricing_with_refresh(model)
+        pricing = cat.get_pricing_with_refresh(model)
 
     p_tokens = max(0, int(prompt_tokens or 0))
     c_tokens = max(0, int(completion_tokens or 0))
     total = p_tokens + c_tokens
-    currency = pricing.currency if pricing else cache.currency
+    currency = pricing.currency if pricing else cat.currency
 
     if pricing is None:
         return RequestCost(
@@ -307,34 +307,20 @@ class ModelCatalog:
     def cache_file_path(self) -> Path:
         if self._explicit_file is not None:
             return Path(self._explicit_file)
-        val = _get_setting(
-            "MODEL_CATALOG_FILE",
-            _get_setting("MODEL_PRICING_CACHE_FILE", "data/model_catalog.json"),
-        )
+        val = _get_setting("MODEL_CATALOG_FILE", "data/model_catalog.json")
         return Path(val)
 
     @property
     def ttl_seconds(self) -> int:
         if self._explicit_ttl is not None:
             return self._explicit_ttl
-        val = _get_setting(
-            "MODEL_CATALOG_TTL_SECONDS",
-            _get_setting("MODEL_PRICING_CACHE_TTL_SECONDS", 86400),
-        )
+        val = _get_setting("MODEL_CATALOG_TTL_SECONDS", 86400)
         return int(val)
 
     def _load_from_disk(self) -> None:
         p = self.cache_file_path
         if not p.exists():
-            # Check migration fallback only when using the default catalog path
-            if self._explicit_file is None:
-                fallback = Path("data/model_pricing_cache.json")
-                if fallback.exists() and fallback != p:
-                    p = fallback
-                else:
-                    return
-            else:
-                return
+            return
 
         with self._lock:
             try:
@@ -546,13 +532,9 @@ class ModelCatalog:
                 "is_stale": self.is_stale(),
                 "ttl_seconds": self.ttl_seconds,
                 "currency": self.currency,
-                "cache_file": str(self.cache_file_path),
                 "catalog_file": str(self.cache_file_path),
             }
 
-
-# Backward-compatible aliases
-ModelPricingCache = ModelCatalog
 
 _model_catalog: Optional[ModelCatalog] = None
 _model_catalog_lock = threading.RLock()
@@ -565,6 +547,3 @@ def get_model_catalog() -> ModelCatalog:
             _model_catalog = ModelCatalog()
         return _model_catalog
 
-
-# Backward-compatible alias
-get_pricing_cache = get_model_catalog

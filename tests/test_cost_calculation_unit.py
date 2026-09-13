@@ -1,5 +1,5 @@
 """
-Unit tests for ModelPricingCache and Decimal request cost calculation (academicai/cost_calculation.py).
+Unit tests for ModelCatalog and Decimal request cost calculation (academicai/cost_calculation.py).
 """
 
 import json
@@ -13,12 +13,10 @@ from academicai.cost_calculation import (
     ModelCatalog,
     ModelEntry,
     ModelPricing,
-    ModelPricingCache,
     RequestCost,
     calculate_request_cost,
     parse_model_costs,
     get_model_catalog,
-    get_pricing_cache,
 )
 
 
@@ -216,25 +214,25 @@ def test_request_cost_to_headers_estimated():
     assert headers["X-AcademicAI-Cost-Estimated"] == "true"
 
 
-def test_pricing_cache_staleness_and_fallback(tmp_path):
-    cache = ModelPricingCache(cache_file=tmp_path / "cache.json", ttl_seconds=60)
-    assert cache.is_stale() is True
+def test_model_catalog_staleness_and_fallback(tmp_path):
+    catalog = ModelCatalog(cache_file=tmp_path / "catalog.json", ttl_seconds=60)
+    assert catalog.is_stale() is True
 
-    # Manually populate cache
-    cache._pricing_map = {
+    # Manually populate catalog
+    catalog._pricing_map = {
         "gpt-4o": ModelPricing("gpt-4o", Decimal("0.00000275"), Decimal("0.000011"), Decimal("0"), "EUR", False)
     }
-    cache._last_refreshed_at = datetime.now(timezone.utc)
-    assert cache.is_stale() is False
-    assert cache.get_pricing("gpt-4o") is not None
+    catalog._last_refreshed_at = datetime.now(timezone.utc)
+    assert catalog.is_stale() is False
+    assert catalog.get_pricing("gpt-4o") is not None
 
     # Simulate expired TTL
-    cache._last_refreshed_at = datetime.now(timezone.utc) - timedelta(seconds=120)
-    assert cache.is_stale() is True
+    catalog._last_refreshed_at = datetime.now(timezone.utc) - timedelta(seconds=120)
+    assert catalog.is_stale() is True
 
     # If refresh fails, fallback returns existing cached pricing
-    with patch.object(cache, "_fetch_from_backend", side_effect=RuntimeError("Network error")):
-        pricing = cache.get_pricing_with_refresh("gpt-4o")
+    with patch.object(catalog, "_fetch_from_backend", side_effect=RuntimeError("Network error")):
+        pricing = catalog.get_pricing_with_refresh("gpt-4o")
         assert pricing is not None
         assert pricing.model_id == "gpt-4o"
 
@@ -268,30 +266,30 @@ def test_model_pricing_to_dict_and_from_dict():
     assert restored.raw_costs == pricing.raw_costs
 
 
-def test_model_pricing_cache_default_24h_ttl(tmp_path):
-    cache = ModelPricingCache(cache_file=tmp_path / "cache.json", ttl_seconds=None)
-    assert cache.ttl_seconds == 86400
+def test_model_catalog_default_24h_ttl(tmp_path):
+    catalog = ModelCatalog(cache_file=tmp_path / "catalog.json", ttl_seconds=None)
+    assert catalog.ttl_seconds == 86400
 
     now = datetime.now(timezone.utc)
-    cache._pricing_map = {
+    catalog._pricing_map = {
         "gpt-4o": ModelPricing("gpt-4o", Decimal("0.00000275"), Decimal("0.000011"), Decimal("0"), "EUR", False)
     }
 
     # Within 24 hours: fresh
-    cache._last_refreshed_at = now - timedelta(hours=23)
-    assert cache.is_stale() is False
+    catalog._last_refreshed_at = now - timedelta(hours=23)
+    assert catalog.is_stale() is False
 
     # After 24 hours: stale
-    cache._last_refreshed_at = now - timedelta(hours=25)
-    assert cache.is_stale() is True
+    catalog._last_refreshed_at = now - timedelta(hours=25)
+    assert catalog.is_stale() is True
 
 
-def test_model_pricing_cache_disk_persistence(tmp_path):
-    cache_file = tmp_path / "model_pricing_cache.json"
-    cache1 = ModelPricingCache(cache_file=cache_file, ttl_seconds=86400)
+def test_model_catalog_disk_persistence(tmp_path):
+    catalog_file = tmp_path / "model_catalog.json"
+    cat1 = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400)
 
     now = datetime.now(timezone.utc)
-    cache1._pricing_map = {
+    cat1._pricing_map = {
         "gpt-4o": ModelPricing(
             "gpt-4o",
             Decimal("0.00000275"),
@@ -302,60 +300,60 @@ def test_model_pricing_cache_disk_persistence(tmp_path):
             [{"costType": "input_tokens", "cost": 0.00275}],
         )
     }
-    cache1._last_refreshed_at = now
-    cache1._save_to_disk()
+    cat1._last_refreshed_at = now
+    cat1._save_to_disk()
 
-    assert cache_file.exists()
+    assert catalog_file.exists()
 
-    # Create a new cache instance pointing to the same file
-    cache2 = ModelPricingCache(cache_file=cache_file, ttl_seconds=86400)
-    assert cache2.is_stale() is False
-    pricing = cache2.get_pricing("gpt-4o")
+    # Create a new catalog instance pointing to the same file
+    cat2 = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400)
+    assert cat2.is_stale() is False
+    pricing = cat2.get_pricing("gpt-4o")
     assert pricing is not None
     assert pricing.model_id == "gpt-4o"
     assert pricing.input_cost_per_token == Decimal("0.00000275")
     assert pricing.output_cost_per_token == Decimal("0.000011")
 
 
-def test_model_pricing_cache_get_status(tmp_path):
-    cache_file = tmp_path / "status_test_cache.json"
-    cache = ModelPricingCache(cache_file=cache_file, ttl_seconds=86400)
-    status = cache.get_status()
+def test_model_catalog_get_status(tmp_path):
+    catalog_file = tmp_path / "status_test_catalog.json"
+    catalog = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400)
+    status = catalog.get_status()
 
     assert status["models_cached"] == 0
     assert status["last_refreshed_at"] is None
     assert status["is_stale"] is True
     assert status["ttl_seconds"] == 86400
     assert status["currency"] == "EUR"
-    assert status["cache_file"] == str(cache_file)
+    assert status["catalog_file"] == str(catalog_file)
 
 
-def test_model_pricing_cache_currency_ssot(tmp_path):
-    cache_file = tmp_path / "pricing_ssot.json"
-    cache1 = ModelPricingCache(cache_file=cache_file, ttl_seconds=86400, currency="EUR")
-    cache1._pricing_map = {
+def test_model_catalog_currency_ssot(tmp_path):
+    catalog_file = tmp_path / "catalog_ssot.json"
+    cat1 = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400, currency="EUR")
+    cat1._pricing_map = {
         "gpt-4o": ModelPricing("gpt-4o", Decimal("0.00000275"), Decimal("0.000011"), Decimal("0"))
     }
-    cache1._last_refreshed_at = datetime.now(timezone.utc)
-    cache1._save_to_disk()
+    cat1._last_refreshed_at = datetime.now(timezone.utc)
+    cat1._save_to_disk()
 
     # Verify JSON file has currency defined once at the root level
-    raw = json.loads(cache_file.read_text(encoding="utf-8"))
+    raw = json.loads(catalog_file.read_text(encoding="utf-8"))
     assert raw["currency"] == "EUR"
 
-    # Modify currency directly in the JSON cache file to USD
+    # Modify currency directly in the JSON file to USD
     raw["currency"] = "USD"
-    cache_file.write_text(json.dumps(raw), encoding="utf-8")
+    catalog_file.write_text(json.dumps(raw), encoding="utf-8")
 
-    # Reload in a new cache instance
-    cache2 = ModelPricingCache(cache_file=cache_file, ttl_seconds=86400)
-    assert cache2.currency == "USD"
-    pricing = cache2.get_pricing("gpt-4o")
+    # Reload in a new catalog instance
+    cat2 = ModelCatalog(cache_file=catalog_file, ttl_seconds=86400)
+    assert cat2.currency == "USD"
+    pricing = cat2.get_pricing("gpt-4o")
     assert pricing is not None
     assert pricing.currency == "USD"
 
-    # Calculation dynamically picks up the currency from the cache SSOT
-    cost = calculate_request_cost("gpt-4o", 100, 50, pricing_cache=cache2)
+    # Calculation dynamically picks up the currency from the catalog SSOT
+    cost = calculate_request_cost("gpt-4o", 100, 50, catalog=cat2)
     assert cost.currency == "USD"
     assert cost.to_headers()["X-AcademicAI-Cost-Currency"] == "USD"
 
@@ -448,16 +446,9 @@ def test_model_catalog_get_model_and_get_models(tmp_path):
 
 def test_model_catalog_default_file_path(monkeypatch):
     monkeypatch.delenv("ACADEMICAI_MODEL_CATALOG_FILE", raising=False)
-    monkeypatch.delenv("ACADEMICAI_MODEL_PRICING_CACHE_FILE", raising=False)
     catalog = ModelCatalog()
     assert catalog.cache_file_path.name == "model_catalog.json"
     assert "data" in str(catalog.cache_file_path)
-
-
-def test_model_catalog_aliases():
-    assert ModelCatalog is ModelPricingCache
-    assert ModelEntry is ModelPricing
-    assert get_model_catalog is get_pricing_cache
 
 
 

@@ -103,12 +103,10 @@ from .cost_calculation import (  # noqa: F401
     ModelCatalog,
     ModelEntry,
     ModelPricing,
-    ModelPricingCache,
     RequestCost,
     calculate_request_cost,
     parse_model_costs,
     get_model_catalog,
-    get_pricing_cache,
 )
 from .local_cost_tracker import (  # noqa: F401
     LocalCostStore,
@@ -192,9 +190,9 @@ __all__ = [
     "is_human_readable_target", "_is_human_readable_target",
     "last_user_text", "_last_user_text",
     "run_humanization_pass", "_run_humanization_pass",
-    "ModelCatalog", "ModelPricingCache", "ModelEntry", "ModelPricing",
+    "ModelCatalog", "ModelEntry", "ModelPricing",
     "RequestCost", "calculate_request_cost", "parse_model_costs",
-    "get_model_catalog", "get_pricing_cache",
+    "get_model_catalog",
     "LocalCostStore", "get_local_cost_store",
 ]
 

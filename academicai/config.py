@@ -119,8 +119,6 @@ class Settings:
     ENABLE_LOCAL_COST_TRACKING: bool = True
     MODEL_CATALOG_TTL_SECONDS: int = 86400
     MODEL_CATALOG_FILE: str = "data/model_catalog.json"
-    MODEL_PRICING_CACHE_TTL_SECONDS: int = 86400  # backward-compatible alias
-    MODEL_PRICING_CACHE_FILE: str = "data/model_catalog.json"  # backward-compatible alias
     LOCAL_COST_CACHE_FILE: str = "data/local_cost_cache.json"
     LOCAL_COST_HISTORY_LIMIT: int = 500
     COST_CURRENCY: str = "EUR"
@@ -173,14 +171,9 @@ class Settings:
         local_cost_cache_default = "data/local_cost_cache.json"
         pid_default = Path("server.pid")
 
-        catalog_file = str(
-            e.get("ACADEMICAI_MODEL_CATALOG_FILE")
-            or e.get("ACADEMICAI_MODEL_PRICING_CACHE_FILE")
-            or model_catalog_default
-        )
+        catalog_file = str(e.get("ACADEMICAI_MODEL_CATALOG_FILE") or model_catalog_default)
         catalog_ttl = _parse_int(
-            e.get("ACADEMICAI_MODEL_CATALOG_TTL_SECONDS")
-            or e.get("ACADEMICAI_MODEL_PRICING_CACHE_TTL_SECONDS"),
+            e.get("ACADEMICAI_MODEL_CATALOG_TTL_SECONDS"),
             86400,
             min_val=30,
         )
@@ -202,8 +195,6 @@ class Settings:
             ENABLE_LOCAL_COST_TRACKING=_parse_bool(e.get("ACADEMICAI_ENABLE_LOCAL_COST_TRACKING"), True),
             MODEL_CATALOG_TTL_SECONDS=catalog_ttl,
             MODEL_CATALOG_FILE=catalog_file,
-            MODEL_PRICING_CACHE_TTL_SECONDS=catalog_ttl,
-            MODEL_PRICING_CACHE_FILE=catalog_file,
             LOCAL_COST_CACHE_FILE=str(e.get("ACADEMICAI_LOCAL_COST_CACHE_FILE", local_cost_cache_default)),
             LOCAL_COST_HISTORY_LIMIT=_parse_int(e.get("ACADEMICAI_LOCAL_COST_HISTORY_LIMIT"), 500, min_val=10),
             COST_CURRENCY=str(e.get("ACADEMICAI_COST_CURRENCY", "EUR")).strip() or "EUR",
@@ -303,8 +294,6 @@ COST_REFRESH_TIMEOUT_SECONDS = _default_settings.COST_REFRESH_TIMEOUT_SECONDS
 ENABLE_LOCAL_COST_TRACKING = _default_settings.ENABLE_LOCAL_COST_TRACKING
 MODEL_CATALOG_TTL_SECONDS = _default_settings.MODEL_CATALOG_TTL_SECONDS
 MODEL_CATALOG_FILE = _default_settings.MODEL_CATALOG_FILE
-MODEL_PRICING_CACHE_TTL_SECONDS = _default_settings.MODEL_PRICING_CACHE_TTL_SECONDS
-MODEL_PRICING_CACHE_FILE = _default_settings.MODEL_PRICING_CACHE_FILE
 LOCAL_COST_CACHE_FILE = _default_settings.LOCAL_COST_CACHE_FILE
 LOCAL_COST_HISTORY_LIMIT = _default_settings.LOCAL_COST_HISTORY_LIMIT
 COST_CURRENCY = _default_settings.COST_CURRENCY
@@ -370,8 +359,8 @@ __all__ = [
     "COST_CACHE_TTL_SECONDS",
     "COST_REFRESH_TIMEOUT_SECONDS",
     "ENABLE_LOCAL_COST_TRACKING",
-    "MODEL_PRICING_CACHE_TTL_SECONDS",
-    "MODEL_PRICING_CACHE_FILE",
+    "MODEL_CATALOG_TTL_SECONDS",
+    "MODEL_CATALOG_FILE",
     "LOCAL_COST_CACHE_FILE",
     "LOCAL_COST_HISTORY_LIMIT",
     "MAX_MESSAGES",

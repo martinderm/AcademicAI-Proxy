@@ -34,7 +34,8 @@ from academicai.config import (
     DEFAULT_TOOL_VERBOSITY,
     ENABLE_HUMANIZATION_PASS,
     ENABLE_LOCAL_COST_TRACKING,
-    MODEL_PRICING_CACHE_TTL_SECONDS,
+    MODEL_CATALOG_TTL_SECONDS,
+    MODEL_CATALOG_FILE,
     LOCAL_COST_CACHE_FILE,
     LOCAL_COST_HISTORY_LIMIT,
     MAX_REQUEST_JSON_CHARS,
@@ -44,7 +45,6 @@ from academicai.config import (
 from academicai.cost_calculation import (
     calculate_request_cost,
     get_model_catalog,
-    get_pricing_cache,
     ModelCatalog,
     RequestCost,
 )
@@ -107,7 +107,7 @@ _apply_post_tool_guard = apply_post_tool_guard
 _is_human_readable_target = is_human_readable_target
 _run_humanization_pass = run_humanization_pass
 _calculate_request_cost = calculate_request_cost
-_get_pricing_cache = get_pricing_cache
+_get_model_catalog = get_model_catalog
 _get_local_cost_store = get_local_cost_store
 
 _INITIAL_DEFAULTS: dict[str, Any] = {
@@ -126,8 +126,8 @@ _INITIAL_DEFAULTS: dict[str, Any] = {
     "_build_cost_headers": build_cost_headers,
     "calculate_request_cost": calculate_request_cost,
     "_calculate_request_cost": calculate_request_cost,
-    "get_pricing_cache": get_pricing_cache,
-    "_get_pricing_cache": get_pricing_cache,
+    "get_model_catalog": get_model_catalog,
+    "_get_model_catalog": get_model_catalog,
     "get_local_cost_store": get_local_cost_store,
     "_get_local_cost_store": get_local_cost_store,
     "validate_request_json_size": validate_request_json_size,
@@ -302,17 +302,13 @@ def cost_status(key: str = Depends(verify_key)):
     store = store_fn()
     local_status = store.get_status_payload()
 
-    # Model catalog & pricing cache status
+    # Model catalog status
     catalog_fn = (
         _get_setting("_get_model_catalog")
-        or _get_setting("get_model_catalog")
-        or _get_setting("_get_pricing_cache")
-        or _get_setting("get_pricing_cache", get_model_catalog)
+        or _get_setting("get_model_catalog", get_model_catalog)
     )
     catalog = catalog_fn()
-    catalog_status = catalog.get_status()
-    local_status["model_catalog"] = catalog_status
-    local_status["pricing_cache"] = catalog_status
+    local_status["model_catalog"] = catalog.get_status()
 
     # Merged payload: preserves all root keys for backward compatibility
     # and adds structured sections for both backend monitoring and local tracking.
